@@ -2,6 +2,7 @@
 # - unconditional training
 # - swapping source and target (= training forward and backward)
 # - using a label embedding as source/target
+# - x-prediction with v-loss. This resembles (a)(3) from https://arxiv.org/pdf/2511.13720
 
 import argparse
 import os
@@ -11,12 +12,18 @@ from flowmatch.label_embeddings import ScalarLevelsEmbedding
 
 
 class RF:
-    def __init__(self, model, ln=True, source="noise", target="image", use_conditioning=False):
+    def __init__(self, model, ln=True, source="noise", target="image", use_conditioning=False, prediction="v"):
+        """
+        use_conditioning: if we want to use class conditioning
+
+        prediction: either "v" or "x", specifies what we predict ("v" = velocity, "x" = data). We always use v-loss.
+        """
         self.model = model
         self.ln = ln
         self.source_type = source
         self.target_type = target
         self.use_conditioning = use_conditioning
+        self.prediction = prediction
         self.label_embedder = ScalarLevelsEmbedding(H=32, W=32, C=1, num_classes=10, std_scale=0.3)
 
     def get_distribution(self, dtype, x, cond):
@@ -43,8 +50,14 @@ class RF:
             cond *= 0 
         
         zt = (1 - texp) * z0 + texp * z1
-        vtheta = self.model(zt, t, cond)
+        model_output = self.model(zt, t, cond)
         
+        if self.prediction == "v":
+            vtheta = model_output
+        elif self.prediction == "x":
+            # v_theta = (x_theta - z_t) / (1 - t)
+            vtheta = (model_output - zt) / (1.0 - texp + 1e-5)
+
         batchwise_mse = ((z1 - z0 - vtheta) ** 2).mean(dim=list(range(1, len(x.shape))))
         tlist = batchwise_mse.detach().cpu().reshape(-1).tolist()
         ttloss = [(tv, tloss) for tv, tloss in zip(t, tlist)]
@@ -68,16 +81,31 @@ class RF:
                 t = 1.0 - (i / sample_steps)
                 step_sign = -1.0
                 
-            t = torch.tensor([t] * b).to(z.device)
+            t_tensor = torch.tensor([t] * b).to(z.device)
 
             cond_run = cond.clone()
             if not self.use_conditioning:
                 cond_run *= 0 
             
-            vc = self.model(z, t, cond_run)
+            out_c = self.model(z, t_tensor, cond_run)
             
+            if self.prediction == "v":
+                vc = out_c
+            elif self.prediction == "x":
+                # v = (x - z) / (1 - t)
+                denom = 1.0 - t
+                if abs(denom) < 1e-5: denom = 1e-5 
+                vc = (out_c - z) / denom
+
             if null_cond is not None:
-                vu = self.model(z, t, null_cond)
+                out_u = self.model(z, t_tensor, null_cond)
+                if self.prediction == "v":
+                    vu = out_u
+                elif self.prediction == "x":
+                    # v = (x - z) / (1 - t)
+                    denom = 1.0 - t
+                    if abs(denom) < 1e-5: denom = 1e-5
+                    vu = (out_u - z) / denom
                 vc = vu + cfg * (vc - vu)
             
             z = z + step_sign * dt * vc
@@ -103,12 +131,15 @@ if __name__ == "__main__":
     parser.add_argument("--cifar", action="store_true")
     parser.add_argument("--source", type=str, default="noise", choices=["noise", "image", "label_embed"])
     parser.add_argument("--target", type=str, default="image", choices=["noise", "image", "label_embed"])
+    parser.add_argument("--prediction", type=str, default="v", choices=["v", "x"], help="Prediction target: v (velocity) or x (data)")
     parser.add_argument("--use_conditioning", action="store_true", help="Enable class conditioning")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use (cuda, cpu, mps)")
     args = parser.parse_args()
 
     device = torch.device(args.device)
     print(f"Using device: {device}")
+    print(f"Prediction mode: {args.prediction}-pred with v-loss")
+
     CIFAR = args.cifar
 
     if CIFAR:
@@ -145,19 +176,22 @@ if __name__ == "__main__":
     model_size = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Number of parameters: {model_size}, {model_size / 1e6}M")
 
-    rf = RF(model, source=args.source, target=args.target, use_conditioning=args.use_conditioning)
+    rf = RF(model, source=args.source, target=args.target, use_conditioning=args.use_conditioning, prediction=args.prediction)
     optimizer = optim.Adam(model.parameters(), lr=5e-4)
     criterion = torch.nn.MSELoss()
 
     mnist = fdatasets(root="./data", train=True, download=True, transform=transform)
     dataloader = DataLoader(mnist, batch_size=256, shuffle=True, drop_last=True)
 
+    mnist_val = fdatasets(root="./data", train=False, download=True, transform=transform)
+    dataloader_val = DataLoader(mnist_val, batch_size=16, shuffle=False, drop_last=True)
+
     # used for generating gifs/images in case we start from the image distribution
-    batch = next(iter(dataloader))
+    batch = next(iter(dataloader_val))
     val_x = batch[0][:16].to(device)
     val_c = batch[1][:16].to(device)
 
-    run_name = f"{dataset_name}_{args.source}_to_{args.target}_cond{args.use_conditioning}"
+    run_name = f"{dataset_name}_{args.source}_to_{args.target}_{args.prediction}_cond_{args.use_conditioning}"
     wandb.init(project=f"rf_{dataset_name}", name=run_name, config=args)
 
     for epoch in range(100):
@@ -195,9 +229,8 @@ if __name__ == "__main__":
 
         rf.model.eval()
         with torch.no_grad():
-            uncond = None
-
-            save_path = "/Users/michaeleberhard/flowmatch/minRF/contents"
+            uncond = None # we do not use cfg by default
+            save_path = "./contents"
             if not os.path.exists(save_path): os.makedirs(save_path, exist_ok=True)
 
             # forward
