@@ -14,41 +14,11 @@ def set_seed(seed: int):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-def resolve_source_target(direction: str, image: Tensor, label: Tensor, t: Tensor) -> tuple[Tensor, Tensor, Tensor]:
-    if direction == "image_to_label":
-        return image, label, t
-    elif direction == "label_to_image":
-        # we also rotate t so that inputs are same
-        return label, image, 1.0 - t
-    else:
-        raise ValueError(f"Unknown direction: {direction}")
-    
-
-def show_sequence(seq, ncols=10, nrows=10, vmin=-1, vmax=1, cmap="gray", title=None):
-    if isinstance(seq, list):
-        seq = torch.stack(seq, dim=0)
-    T, B, C, H, W = seq.shape
-    nrows = min(nrows, B)
-    cols = min(ncols, T)
-    step = max(1, T // ncols)
-
-    fig, axes = plt.subplots(nrows, cols, figsize=(cols, nrows))
-    for r in range(nrows):
-        for c in range(cols):
-            t_idx = c * step
-            axes[r, c].imshow(seq[t_idx, r].permute(1,2,0).cpu().numpy(), cmap=cmap, vmin=vmin, vmax=vmax)
-            axes[r, c].axis("off")
-
-    if title:
-        fig.suptitle(title)
-    return fig
-
-
 def nearest_labels_l2(final_states: Tensor, means: Tensor) -> Tensor:
-    diffs = final_states.unsqueeze(1) - means.unsqueeze(0)
-    dists = (diffs**2).sum(dim=(2,3,4)).sqrt()
-    preds = torch.argmin(dists, dim=1)
-    return preds
+    flat_states = final_states.flatten(start_dim=1)
+    flat_means = means.flatten(start_dim=1)
+    dists = torch.cdist(flat_states, flat_means, p=2)
+    return torch.argmin(dists, dim=1)
 
 def nearest_labels_cos(final_states: Tensor, means: Tensor) -> Tensor:
     X = F.normalize(final_states.flatten(start_dim=1), p=2, dim=1, eps=1e-12)
