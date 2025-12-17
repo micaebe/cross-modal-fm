@@ -1,0 +1,6 @@
+einops
+wandb
+torchdiffeq
+torch
+torchvision
+torch-fidelity
