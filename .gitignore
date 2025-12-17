@@ -1,3 +1,8 @@
 wandb
 __pycache__
 *.gz
+*.gif
+*.png
+*ubyte
+data
+*.pt
