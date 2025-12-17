@@ -1,5 +1,5 @@
 # from: https://github.com/cloneofsimo/minRF
-# modified to be able to dont use any conditioning and to pass the force_drop_ids argument to the LabelEmbedder to enable cfg in crossflow style
+# modified to be able to pass a directional conditioning for bidirectional training.
 
 # Code heavily based on https://github.com/Alpha-VLLM/LLaMA2-Accessory
 # this is modeling code for DiT-LLaMA model
@@ -243,6 +243,7 @@ class DiT_Llama(nn.Module):
         norm_eps=1e-5,
         class_dropout_prob=0.1,
         num_classes=10,
+        bidirectional=False,
     ):
         super().__init__()
 
@@ -264,7 +265,9 @@ class DiT_Llama(nn.Module):
         nn.init.constant_(self.x_embedder.bias, 0)
 
         self.t_embedder = TimestepEmbedder(min(dim, 1024))
-        self.y_embedder = LabelEmbedder(num_classes, min(dim, 1024), class_dropout_prob) if num_classes > 0 else None
+        self.y_embedder = LabelEmbedder(num_classes, min(dim, 1024), class_dropout_prob)
+        self.bidir_embedder = nn.Embedding(2, min(dim, 1024)) if bidirectional else None
+        self.num_classes = num_classes
 
         self.layers = nn.ModuleList(
             [
@@ -305,7 +308,7 @@ class DiT_Llama(nn.Module):
         x = x.permute(0, 2, 4, 1, 3, 5).flatten(-3).flatten(1, 2)
         return x
 
-    def forward(self, x, t, y, force_drop_ids=None):
+    def forward(self, x, t, y, bidir_cond=None):
         self.freqs_cis = self.freqs_cis.to(x.device)
 
         x = self.init_conv_seq(x)
@@ -315,9 +318,12 @@ class DiT_Llama(nn.Module):
 
         t = self.t_embedder(t)  # (N, D)
         adaln_input = t.to(x.dtype)
-        if self.y_embedder is not None:
-            y = self.y_embedder(y, self.training, force_drop_ids)  # (N, D)
-            adaln_input += y.to(x.dtype)
+        y = self.y_embedder(y, self.training)  # (N, D)
+        adaln_input += y.to(x.dtype)
+        if self.bidir_embedder is not None:
+            # if we set bidirectional, we expect bidir_cond to be not None
+            bidir_emb = self.bidir_embedder(bidir_cond)
+            adaln_input += bidir_emb.to(x.dtype)
 
         for layer in self.layers:
             x = layer(x, self.freqs_cis[: x.size(1)], adaln_input=adaln_input)
@@ -327,7 +333,7 @@ class DiT_Llama(nn.Module):
 
         return x
 
-    def forward_with_cfg(self, x, t, y, cfg_scale, force_drop_ids=None):
+    def forward_with_cfg(self, x, t, y, cfg_scale):
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
         model_out = self.forward(combined, t, y)

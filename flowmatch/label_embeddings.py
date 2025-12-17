@@ -20,10 +20,26 @@ class BaseEmbedding(nn.Module):
             return batch_means + batch_stds * noise
         
         return batch_means
+    
+    def _setup(self, means, stds, mode='none'):
+        """
+        Modes:
+        - 'none' : no change
+        - 'mean' : normalize all means to zero mean and unit RMS
+        """
+        if mode != 'none':
+            means_flat = means.view(self.num_classes, -1)
+            global_mean = means_flat.mean()
+            global_rms  = means_flat.pow(2).mean().sqrt()
+            new_means_flat = (means_flat - global_mean) / global_rms
+            means = new_means_flat.view(self.num_classes, self.C, self.H, self.W)
+
+        self.register_buffer("class_means", means)
+        self.register_buffer("class_stds", stds)
 
 
 class GrayScaleEmbedding(BaseEmbedding):
-    def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.3):
+    def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.3, mode='none'):
         super().__init__(H, W, C, num_classes, std_scale)
 
         vals = torch.linspace(-1.0, 1.0, steps=num_classes)
@@ -31,12 +47,11 @@ class GrayScaleEmbedding(BaseEmbedding):
         means = repeat(vals, 'n -> n c h w', c=C, h=H, w=W)
         stds = torch.full((num_classes, C, H, W), std_scale)
 
-        self.register_buffer("class_means", means)
-        self.register_buffer("class_stds", stds)
+        self._setup(means, stds, mode=mode)
 
 
 class RectangleEmbedding(BaseEmbedding):
-    def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.3, rect_size=(8, 8)):
+    def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.3, rect_size=(8, 8), mode='none'):
         super().__init__(H, W, C, num_classes, std_scale)
         means = torch.zeros(num_classes, C, H, W)
         stds = torch.full((num_classes, C, H, W), std_scale)
@@ -62,13 +77,12 @@ class RectangleEmbedding(BaseEmbedding):
             
             means[i, :, y0 : y0 + rh, x0 : x0 + rw] = 1.0
 
-        self.register_buffer("class_means", means)
-        self.register_buffer("class_stds", stds)
+        self._setup(means, stds, mode=mode)
 
 
 class OrthoEmbedding(BaseEmbedding):
     def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.5, 
-                 cache_dir="./embeddings_cache", seed=42):
+                 cache_dir="./embeddings_cache", seed=42, mode='none'):
         super().__init__(H, W, C, num_classes, std_scale)
         self.cache_dir = cache_dir
         self.seed = seed
@@ -79,8 +93,7 @@ class OrthoEmbedding(BaseEmbedding):
 
         means, stds = self._load_or_create()
 
-        self.register_buffer("class_means", means)
-        self.register_buffer("class_stds", stds)
+        self._setup(means, stds, mode=mode)
 
     def _get_config_name(self):
         return f"ortho_C{self.num_classes}_H{self.H}W{self.W}C{self.C}_S{self.std_scale}_seed{self.seed}.pt"
@@ -117,7 +130,7 @@ class OrthoEmbedding(BaseEmbedding):
 
 class ClipEmbedding(BaseEmbedding):
     def __init__(self, H=28, W=28, C=1, num_classes=10, std_scale=0.1, 
-                 model_name="openai/clip-vit-base-patch32", device="cpu"):
+                 model_name="openai/clip-vit-base-patch32", clip_device="cpu", mode='none'):
         super().__init__(H, W, C, num_classes, std_scale)
         try:
             from transformers import CLIPTokenizer, CLIPTextModel
@@ -125,30 +138,30 @@ class ClipEmbedding(BaseEmbedding):
             raise RuntimeError("transformers not installed.") from e
 
         tokenizer = CLIPTokenizer.from_pretrained(model_name)
-        model = CLIPTextModel.from_pretrained(model_name).to(device)
+        model = CLIPTextModel.from_pretrained(model_name).to(clip_device)
         
-        defaults = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
+        #defaults = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
+        defaults = ["A Dog in the left corner", "A Dog in the right corner", "A Cat in the left corner", "A Cat in the right corner", "A Cat in the upper corner", "A Cat in the lower corner", "A Dog in the upper corner", "A Dog in the lower corner", "A Cat with a Hat", "A Dog with a Hat"]
         if num_classes > len(defaults):
             raise ValueError(f"only 10 classes supported, got {num_classes}")
         labels_txt = defaults[:num_classes]
 
-        inputs = tokenizer(labels_txt, padding=True, return_tensors="pt").to(device)
+        inputs = tokenizer(labels_txt, padding=True, return_tensors="pt").to(clip_device)
         with torch.no_grad():
             outputs = model(**inputs)
         text_embeds = outputs.pooler_output  # (N, 512)
 
         D = H * W * C
-        A = torch.randn(D, 512, device=device)
+        A = torch.randn(D, 512, device=clip_device)
         Q, _ = torch.linalg.qr(A, mode='reduced')
         P = Q[:, :512]
         
         mapped = text_embeds @ P.T  # (N, D)
 
         means = rearrange(mapped, 'n (c h w) -> n c h w', c=C, h=H, w=W)
-        stds = torch.full((num_classes, C, H, W), std_scale, device=device)
+        stds = torch.full((num_classes, C, H, W), std_scale, device=clip_device)
 
-        self.register_buffer("class_means", means)
-        self.register_buffer("class_stds", stds)
+        self._setup(means, stds, mode=mode)
 
 
 
