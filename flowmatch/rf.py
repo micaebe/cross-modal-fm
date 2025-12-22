@@ -113,8 +113,7 @@ class RF:
 
         def ode_func(t, x):
             t_batch = torch.full((x.shape[0],), t.item(), device=x.device)
-            with torch.autocast(dtype=torch.bfloat16):
-                vc = self.model(x, t_batch, cond, bidi_mask)
+            vc = self.model(x, t_batch, cond, bidi_mask)
             if null_cond is not None and cfg != 1.0:
                 vu = self.model(x, t_batch, null_cond, bidi_mask)
                 vc = vu + cfg * (vc - vu)
