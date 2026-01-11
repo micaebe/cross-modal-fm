@@ -1,0 +1,26 @@
+from typing import Any
+from streaming import StreamingDataset
+from streaming.base.format.mds.encodings import Encoding, _encodings
+
+
+class StreamingWrapperDataset(StreamingDataset):
+    def __getitem__(self, idx: int):
+        sample = super().__getitem__(idx)
+        vae_flat = sample["vae_output"]
+        vae_tensor = torch.from_numpy(vae_flat).reshape(4, 32, 32) * 0.13025
+        label = int(sample["label"])
+        return vae_tensor, label
+
+class uint8(Encoding):
+    def encode(self, obj: Any) -> bytes:
+        return obj.tobytes()
+
+    def decode(self, data: bytes) -> Any:
+        x = np.frombuffer(data, np.uint8).astype(np.float32)
+        return (x / 255.0 - 0.5) * 24.0
+
+_encodings["uint8"] = uint8
+
+def worker_init_fn(worker_id):
+    from streaming.base.format.mds.encodings import _encodings
+    _encodings["uint8"] = uint8

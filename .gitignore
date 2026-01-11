@@ -6,3 +6,7 @@ __pycache__
 *ubyte
 data
 *.pt
+*.env
+*.mds
+*.json
+/experiments

@@ -5,7 +5,6 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-import wandb
 from tqdm import tqdm
 
 class ResidualBlock(nn.Module):
@@ -130,8 +129,6 @@ if __name__ == "__main__":
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     criterion = nn.CrossEntropyLoss()
 
-    wandb.init(project=f"{args.dataset}-classifier", config=args)
-
     print("Starting training")
     for epoch in range(args.epochs):
         model.train()
@@ -148,7 +145,6 @@ if __name__ == "__main__":
 
             acc = (logits.argmax(1) == y).float().mean()
             current_lr = optimizer.param_groups[0]['lr']
-            wandb.log({"train_loss": loss.item(), "train_step_acc": acc.item(), "lr": current_lr})
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         scheduler.step()
 
@@ -178,13 +174,4 @@ if __name__ == "__main__":
 
         print(f"Val Acc: {val_acc:.4f} | Val ECE: {val_ece:.4f}")
 
-        wandb.log({
-            "val_acc": val_acc,
-            "val_loss": avg_val_loss,
-            "val_ece": val_ece,
-            "epoch": epoch,
-        })
-
     torch.save(model.state_dict(), args.save_path)
-
-    wandb.finish()

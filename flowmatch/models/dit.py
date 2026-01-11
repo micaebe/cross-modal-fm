@@ -29,8 +29,8 @@ class TimestepEmbedder(nn.Module):
     def timestep_embedding(t, dim, max_period=10000):
         half = dim // 2
         freqs = torch.exp(
-            -math.log(max_period) * torch.arange(start=0, end=half) / half
-        ).to(t.device)
+            -math.log(max_period) * torch.arange(start=0, end=half, device=t.device) / half
+        )
         args = t[:, None] * freqs[None]
         embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
         if dim % 2:
@@ -251,6 +251,7 @@ class DiT_Llama(nn.Module):
         self.out_channels = in_channels
         self.input_size = input_size
         self.patch_size = patch_size
+        self.bidirectional = bidirectional
 
         self.init_conv_seq = nn.Sequential(
             nn.Conv2d(in_channels, dim // 2, kernel_size=5, padding=2, stride=1),
@@ -264,9 +265,19 @@ class DiT_Llama(nn.Module):
         self.x_embedder = nn.Linear(patch_size * patch_size * dim // 2, dim, bias=True)
         nn.init.constant_(self.x_embedder.bias, 0)
 
-        self.t_embedder = TimestepEmbedder(min(dim, 1024))
-        self.y_embedder = LabelEmbedder(num_classes, min(dim, 1024), class_dropout_prob)
-        self.bidir_embedder = nn.Embedding(2, min(dim, 1024)) if bidirectional else None
+        embedding_dim = min(dim, 1024)
+        self.t_embedder = TimestepEmbedder(embedding_dim)
+        self.y_embedder = LabelEmbedder(num_classes, embedding_dim, class_dropout_prob)
+        if self.bidirectional:
+            self.bidir_embedder = nn.Embedding(2, 128)
+            self.bidir_adapter = nn.Sequential(
+                nn.Linear(embedding_dim + 128, embedding_dim // 2),
+                nn.SiLU(),
+                nn.Linear(embedding_dim // 2, embedding_dim)
+            )
+            nn.init.constant_(self.bidir_adapter[-1].weight, 0)
+            nn.init.constant_(self.bidir_adapter[-1].bias, 0)
+            nn.init.normal_(self.bidir_embedder.weight, std=0.02)
         self.num_classes = num_classes
 
         self.layers = nn.ModuleList(
@@ -284,7 +295,7 @@ class DiT_Llama(nn.Module):
         )
         self.final_layer = FinalLayer(dim, patch_size, self.out_channels)
 
-        self.freqs_cis = DiT_Llama.precompute_freqs_cis(dim // n_heads, 4096)
+        self.register_buffer("freqs_cis", DiT_Llama.precompute_freqs_cis(dim // n_heads, 4096), persistent=False)
 
     def unpatchify(self, x):
         c = self.out_channels
@@ -309,7 +320,7 @@ class DiT_Llama(nn.Module):
         return x
 
     def forward(self, x, t, y, bidir_cond=None):
-        self.freqs_cis = self.freqs_cis.to(x.device)
+        # self.freqs_cis = self.freqs_cis.to(x.device)
 
         x = self.init_conv_seq(x)
 
@@ -320,9 +331,9 @@ class DiT_Llama(nn.Module):
         adaln_input = t.to(x.dtype)
         y = self.y_embedder(y, self.training)  # (N, D)
         adaln_input += y.to(x.dtype)
-        if self.bidir_embedder is not None:
+        if self.bidirectional:
             # if we set bidirectional, we expect bidir_cond to be not None
-            bidir_emb = self.bidir_embedder(bidir_cond)
+            bidir_emb = self.bidir_adapter(torch.cat([c, self.bidir_embedder(bidir_cond)], dim=1))  # (N, D)
             adaln_input += bidir_emb.to(x.dtype)
 
         for layer in self.layers:

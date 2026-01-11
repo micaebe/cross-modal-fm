@@ -3,4 +3,6 @@ wandb
 torchdiffeq
 torch
 torchvision
-torch-fidelity
+clean-fid
+hf_transfer
+mosaicml-streaming
