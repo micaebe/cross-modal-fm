@@ -1,6 +1,8 @@
 from typing import Any
 from streaming import StreamingDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
+import numpy as np
+import torch
 
 
 class StreamingWrapperDataset(StreamingDataset):

@@ -4,5 +4,11 @@ torchdiffeq
 torch
 torchvision
 clean-fid
+prdc
 hf_transfer
 mosaicml-streaming
+timm
+tensorboard
+hydra-core
+omegaconf
+diffusers

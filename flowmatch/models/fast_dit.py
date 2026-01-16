@@ -262,13 +262,14 @@ class DiT(nn.Module):
         bidir_cond: (N,) tensor of bidirectional conditioning (0 for forward, 1 for backward), if bidirectional is enabled
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
+        # added scaling of time-step in case we get 0-1 range
+        t = t * 1000 if t.max() <= 1.0 else t
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y  # (N, D)
         if self.bidirectional: # Modified: bidirectional conditioning
-            bidir_cond = self.bidir_embedder(bidir_cond)  # (N, D)
-            bidir_cond = self.bidir_adapter(torch.cat([c, bidir_cond], dim=1))  # (N, D)
-            c = c + bidir_cond
+            bidir_emb = self.bidir_adapter(torch.cat([t, self.bidir_embedder(bidir_cond)], dim=1))  # (N, D)
+            c = c + bidir_emb
 
         for block in self.blocks:
             if self.grad_checkpointing and self.training: # Modified: optional gradient checkpointing

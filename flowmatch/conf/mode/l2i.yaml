@@ -1,0 +1,3 @@
+bidirectional: false
+source: label
+target: image

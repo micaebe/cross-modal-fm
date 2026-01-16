@@ -1,0 +1,4 @@
+name: mnist
+image_size: 32
+channels: 1
+num_classes: 10

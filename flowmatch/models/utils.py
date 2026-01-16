@@ -1,6 +1,9 @@
 import torch
 
 class EMA:
+    """
+    Exponential moving average with optional warmup period.
+    """
     def __init__(self, model, decay=0.999, warmup_steps=0):
         self.decay = decay
         self.warmup_steps = warmup_steps

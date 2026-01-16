@@ -1,11 +1,11 @@
-from embeddings.label_embeddings import GrayScaleEmbedding, RectangleEmbedding, ClipEmbedding, LowRankEmbedding
+from embeddings.label_embeddings import GrayScaleEmbedding, RectangleEmbedding, ClipEmbedding, SmoothRandom
 import inspect
 
 EMBEDDINGS = {
     "grayscale": GrayScaleEmbedding,
     "rectangle": RectangleEmbedding,
+    "smoothrand": SmoothRandom,
     "clip": ClipEmbedding,
-    "low_rank": LowRankEmbedding
 }
 
 
@@ -15,7 +15,7 @@ def build_embedding_provider(name: str, **kwargs):
     emb = EMBEDDINGS[name]
     sig = inspect.signature(emb)
     filtered_args = {
-        k: v for k, v in kwargs.items() 
+        k: v for k, v in kwargs.items()
         if k in sig.parameters
     }
     return emb(**filtered_args)

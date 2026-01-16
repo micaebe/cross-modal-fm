@@ -9,4 +9,7 @@ data
 *.env
 *.mds
 *.json
+.DS_Store
+*.pdf
+.venv
 /experiments

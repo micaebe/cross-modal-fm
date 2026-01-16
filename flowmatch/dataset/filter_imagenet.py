@@ -18,13 +18,10 @@ class RawUInt8(Encoding):
 _encodings["uint8"] = RawUInt8
 
 def get_target_indices(num_to_keep, total_classes=1000):
-    np.random.seed(0)
-    all_classes = np.arange(total_classes)
-    
     if num_to_keep >= total_classes:
-        return set(all_classes)
-        
-    return set(np.random.choice(all_classes, num_to_keep, replace=False))
+        return set(np.arange(total_classes))
+    indices = np.linspace(0, total_classes - 1, num_to_keep)
+    return set(np.round(indices).astype(int))
 
 def create_filtered_dataset(src_local, dst_local, keep_classes, num_workers=2, batch_size=512):
     if os.path.exists(dst_local):

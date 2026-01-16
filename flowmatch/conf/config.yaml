@@ -1,0 +1,88 @@
+defaults:
+  - model: DiT
+  - dataset: cifar
+  - mode: l2i
+  - _self_
+
+seed: 42
+device: "cpu"
+project_name: "runs"
+
+optimizer:
+  _target_: torch.optim.AdamW
+  lr: 1e-4
+  weight_decay: 0.0
+  eps: 1e-8
+  betas: [0.9, 0.999]
+
+rf:
+  _target_: rf.RF 
+  ln: false
+  ln_loc: 0.0
+  ln_scale: 1.0
+  lambda_b: 0.5 # lambda b controls the amount of forward vs backward samples in case of bidirectional models
+  cls_dropout_prob: 0.1 # cross-modality class dropout for Cross-Flow indicator
+  stochastic_interpolant_scale: 0.0 # if one wants to use stochastic interpolants
+  source: ${mode.source}
+  target: ${mode.target}
+  bidirectional: ${mode.bidirectional}
+  ode_method: "euler"
+
+label_embedding:
+  _target_: embeddings.build_embeddings.build_embedding_provider
+  H: ${dataset.image_size}
+  W: ${dataset.image_size}
+  C: ${dataset.channels}
+  num_classes: ${dataset.num_classes}
+  name: "rectangle"
+  std_scale: 1.0
+  # rectangle specific configs:
+  blur_sigma: 2.0
+  codes_per_cell: -1
+  patch_size: 10
+  # smooth random specific configs:
+  low_res_dim: 6
+
+use_conditioning: false # should be almost always false, only if we do "classic" flow matching, where we dont have label embeddings
+
+# training args
+total_steps: 200000
+eval_every_steps: 40000
+checkpoint_every_steps: 10 # steps correspond to outer loop steps (eval_every_steps steps is one step here). 10 in this setting will only save the final checkpoint
+lr_warmup_steps: 5000
+batch_size: 256
+max_grad_norm: null
+
+ema_decay: 0.9999
+ema_warmup_steps: 10000
+
+compile_model: true # does currently not work with UNet
+mixed_precision: true
+grad_accum_steps: 1
+
+# eval during training
+eval_batch_size: 100
+eval_batches: 50
+eval_cfg_scale: 1.0
+eval_integration_steps: 40
+classifier_path: "" # path to pre-trained classifier, optional. If provided, the ratio of correct classified generated images will be logged
+fid_ref_dir: null # TODO: check if we need this/how we evaluate imagenet. One option could be to generate the imagenet features once at the very beginning as we do it with cifar.
+
+
+# evaluation using evaluate_checkpoints script
+# -> evaluate checkpoints from this run, can be only used after training
+evaluation:
+  eval_batches: 50
+  use_test_set: true
+  only_final: false # eval all checkpoints or only last/final checkpoint
+  cfg_scales: [1.0, 1.5, 2.0]
+  eval_integration_steps: [25, 40]
+
+resume_checkpoint: ""
+
+hydra:
+  run:
+    dir: ${project_name}/${now:%Y-%m-%d_%H-%M}_${dataset.name}_${mode.source}_${mode.target}_bidir_${mode.bidirectional}
+  sweep:
+    dir: ${project_name}/${now:%Y-%m-%d_%H-%M}_sweep
+    subdir: ${hydra.job.override_dirname}

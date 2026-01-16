@@ -10,6 +10,40 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# added new checkpoint function
+# the old way could not handle checkpointing together with mixed precision training
+# but we disabled checkpointing anyways as it was slower to use then without for our settings
+import torch.utils.checkpoint
+def checkpoint(func, inputs, params, flag):
+    if flag:
+        def wrapped_func(*args):
+            return func(*args)
+        return torch.utils.checkpoint.checkpoint(
+            wrapped_func, *inputs, use_reentrant=False
+        )
+    else:
+        return func(*inputs)
+
+
+def convert_module_to_f16(l):
+    """
+    Convert primitive modules to float16.
+    """
+    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        l.weight.data = l.weight.data.half()
+        if l.bias is not None:
+            l.bias.data = l.bias.data.half()
+
+
+def convert_module_to_f32(l):
+    """
+    Convert primitive modules to float32, undoing convert_module_to_f16().
+    """
+    if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Conv3d)):
+        l.weight.data = l.weight.data.float()
+        if l.bias is not None:
+            l.bias.data = l.bias.data.float()
+
 
 """
 Various utilities for neural networks.
@@ -125,55 +159,6 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     if dim % 2:
         embedding = th.cat([embedding, th.zeros_like(embedding[:, :1])], dim=-1)
     return embedding
-
-
-def checkpoint(func, inputs, params, flag):
-    """
-    Evaluate a function without caching intermediate activations, allowing for
-    reduced memory at the expense of extra compute in the backward pass.
-
-    :param func: the function to evaluate.
-    :param inputs: the argument sequence to pass to `func`.
-    :param params: a sequence of parameters `func` depends on but does not
-                   explicitly take as arguments.
-    :param flag: if False, disable gradient checkpointing.
-    """
-    if flag:
-        args = tuple(inputs) + tuple(params)
-        return CheckpointFunction.apply(func, len(inputs), *args)
-    else:
-        return func(*inputs)
-
-
-class CheckpointFunction(th.autograd.Function):
-    @staticmethod
-    def forward(ctx, run_function, length, *args):
-        ctx.run_function = run_function
-        ctx.input_tensors = list(args[:length])
-        ctx.input_params = list(args[length:])
-        with th.no_grad():
-            output_tensors = ctx.run_function(*ctx.input_tensors)
-        return output_tensors
-
-    @staticmethod
-    def backward(ctx, *output_grads):
-        ctx.input_tensors = [x.detach().requires_grad_(True) for x in ctx.input_tensors]
-        with th.enable_grad():
-            # Fixes a bug where the first op in run_function modifies the
-            # Tensor storage in place, which is not allowed for detach()'d
-            # Tensors.
-            shallow_copies = [x.view_as(x) for x in ctx.input_tensors]
-            output_tensors = ctx.run_function(*shallow_copies)
-        input_grads = th.autograd.grad(
-            output_tensors,
-            ctx.input_tensors + ctx.input_params,
-            output_grads,
-            allow_unused=True,
-        )
-        del ctx.input_tensors
-        del ctx.input_params
-        del output_tensors
-        return (None, None) + input_grads
 
 
 class AttentionPool2d(nn.Module):
@@ -451,7 +436,7 @@ class AttentionBlock(nn.Module):
         self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
 
     def forward(self, x):
-        return checkpoint(self._forward, (x,), self.parameters(), True)
+        return checkpoint(self._forward, (x,), self.parameters(), self.use_checkpoint) # we disable checkpointing
 
     def _forward(self, x):
         b, c, *spatial = x.shape
@@ -602,7 +587,8 @@ class UNetModel(nn.Module):
         use_scale_shift_norm=False,
         resblock_updown=False,
         use_new_attention_order=False,
-        bidirectional=False # modified to include bidirectional flag
+        bidirectional=False, # modified to include bidirectional flag
+        **kwargs # hacky way to allow instantiate pass class_dropout_prob
     ):
         super().__init__()
 
@@ -785,6 +771,22 @@ class UNetModel(nn.Module):
             zero_module(conv_nd(dims, input_ch, out_channels, 3, padding=1)),
         )
 
+    def convert_to_fp16(self):
+        """
+        Convert the torso of the model to float16.
+        """
+        self.input_blocks.apply(convert_module_to_f16)
+        self.middle_block.apply(convert_module_to_f16)
+        self.output_blocks.apply(convert_module_to_f16)
+
+    def convert_to_fp32(self):
+        """
+        Convert the torso of the model to float32.
+        """
+        self.input_blocks.apply(convert_module_to_f32)
+        self.middle_block.apply(convert_module_to_f32)
+        self.output_blocks.apply(convert_module_to_f32)
+
     def forward(self, x, timesteps, y=None, bidir_cond=None):
         """
         Apply the model to an input batch.
@@ -801,13 +803,15 @@ class UNetModel(nn.Module):
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
-        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+        t_input = timesteps * 1000.0 if timesteps.max() <= 1.0 else timesteps # added this to scale up timesteps from 0-1 range
+        t = self.time_embed(timestep_embedding(t_input, self.model_channels))
+        emb = t
 
         if self.num_classes is not None:
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
         if self.bidirectional:
-            bidir_emb = self.bidir_adapter(th.cat([emb, self.bidir_embedder(bidir_cond)], dim=1))
+            bidir_emb = self.bidir_adapter(th.cat([t, self.bidir_embedder(bidir_cond)], dim=1))
             emb = emb + bidir_emb
 
         h = x.type(self.dtype)

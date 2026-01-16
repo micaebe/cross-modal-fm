@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torchvision.transforms.functional import gaussian_blur
 from einops import rearrange, repeat
 import itertools
@@ -20,7 +19,7 @@ class BaseEmbedding(nn.Module):
         batch_stds = self.class_stds[labels]
 
         if sample:
-            noise = torch.randn_like(batch_stds)
+            noise = torch.randn_like(batch_stds, device=labels.device)
             return batch_means + batch_stds * noise
         
         return batch_means
@@ -40,35 +39,47 @@ class GrayScaleEmbedding(BaseEmbedding):
 
 
 class RectangleEmbedding(BaseEmbedding):
-    def __init__(self, H, W, C, num_classes, std_scale, blur_sigma, codes_per_cell):
+    def __init__(self, H, W, C, num_classes, std_scale, blur_sigma, codes_per_cell, patch_size=None):
+        """
+        Args:
+            patch_size: Optional tuple (patch_h, patch_w) or int for square patches. 
+                        If None, patches fill the grid cells (original behavior).
+        """
         super().__init__(H, W, C, num_classes, std_scale)
+        
         codes_map = {
             1: [1.0],
             2: [-1.0, 1.0],
-            3: [-1.0, 0.0, 1.0],
-            4: [-1.0, -0.33, 0.33, 1.0],
-            5: [-1.0, -0.5, 0.0, 0.5, 1.0]
         }
-        code_list = list(itertools.product(codes_map[codes_per_cell], repeat=C))
-        code_list = [torch.tensor(c, dtype=torch.float32) for c in code_list if sum(c) > 0]
-        
-        code_list.sort(key=lambda x: x.sum())
+        if codes_per_cell in codes_map:
+            code_list = [[v] * C for v in codes_map[codes_per_cell]]
+        else:
+            code_list = [list(x) for x in itertools. product([-1.0, 1.0], repeat=C)]
+
+        code_list = [torch.tensor(c, dtype=torch.float32) for c in code_list]
         codes = torch.stack(code_list)
         num_codes = len(codes)
 
         num_cells = math.ceil(num_classes / num_codes)
-        
         cols = math.ceil(math.sqrt(num_cells))
         rows = math.ceil(num_cells / cols)
         
-        cell_h = H // rows
-        cell_w = W // cols
+        cell_h = H / rows
+        cell_w = W / cols
         
-        rh = max(1, int(cell_h * 0.9))
-        rw = max(1, int(cell_w * 0.9))
-        
-        print(f"Embedding Config: {rows}x{cols} Grid ({cell_h}x{cell_w} cells). "
-              f"Codes per cell: {num_codes}. Patch Size: {rh}x{rw}")
+        if patch_size is None:
+            patch_h = int(cell_h)
+            patch_w = int(cell_w)
+        elif isinstance(patch_size, int):
+            patch_h = patch_w = patch_size
+        else:
+            patch_h, patch_w = patch_size
+
+        if num_codes * num_cells > num_classes:
+            codes = codes[:num_classes // num_cells]
+            num_codes = len(codes)
+
+        print(f"Rect. Emb: Grid: {rows}x{cols} | Cell:  {cell_h:.2f}x{cell_w:.2f} | Patch: {patch_h}x{patch_w} | Num Codes: {num_codes}")
 
         means = torch.zeros(num_classes, C, H, W)
         stds = torch.full((num_classes, C, H, W), std_scale)
@@ -77,37 +88,36 @@ class RectangleEmbedding(BaseEmbedding):
             cell_idx = i // num_codes
             code_idx = i % num_codes
             
-            r = cell_idx // cols
-            c = cell_idx % cols
-            center_y = r * cell_h + cell_h // 2
-            center_x = c * cell_w + cell_w // 2
-            
-            y0 = int(center_y - rh / 2)
-            x0 = int(center_x - rw / 2)
-            y0 = max(0, min(y0, H - rh))
-            x0 = max(0, min(x0, W - rw))
-            
-            current_code = codes[code_idx].view(C, 1, 1)
-            means[i, :, y0 : y0 + rh, x0 : x0 + rw] = current_code
+            r, c = divmod(cell_idx, cols)
+
+            center_y = int((r + 0.5) * cell_h)
+            center_x = int((c + 0.5) * cell_w)
+
+            y0 = max(0, center_y - patch_h // 2)
+            x0 = max(0, center_x - patch_w // 2)
+            y1 = min(H, y0 + patch_h)
+            x1 = min(W, x0 + patch_w)
+
+            means[i, :, y0:y1, x0:x1] = codes[code_idx].view(C, 1, 1)
 
         if blur_sigma > 0:
-            means = gaussian_blur(means, kernel_size=5, sigma=blur_sigma)
-            means /= means.amax(dim=(1, 2, 3), keepdim=True)
+            means = gaussian_blur(means, kernel_size=7, sigma=blur_sigma)
+            max_val = means.abs().amax(dim=(1, 2, 3), keepdim=True)
+            means = means / (max_val + 1e-8)
 
         self._setup(means, stds)
 
 
-class LowRankEmbedding(BaseEmbedding):
-    def __init__(self, H, W, C, num_classes, std_scale, low_res_dim=4, cache_dir="../embeddings_cache"):
+class SmoothRandom(BaseEmbedding):
+    def __init__(self, H, W, C, num_classes, std_scale, low_res_dim=4, cache_dir="./embeddings_cache"):
         super().__init__(H, W, C, num_classes, std_scale)
         self.low_res_dim = low_res_dim
         self.cache_dir = cache_dir
-        self.seed = 42
         means, stds = self._load_or_create()
         self._setup(means, stds)
 
     def _get_config_name(self):
-        return f"lowrank_C{self.num_classes}_H{self.H}W{self.W}C{self.C}_S{self.std_scale}_L{self.low_res_dim}_seed{self.seed}.pt"
+        return f"smoothrand_C{self.num_classes}_H{self.H}W{self.W}C{self.C}_S{self.std_scale}_L{self.low_res_dim}.pt"
 
     def _load_or_create(self):
         if not os.path.exists(self.cache_dir):
@@ -119,12 +129,12 @@ class LowRankEmbedding(BaseEmbedding):
             data = torch.load(file_path, map_location="cpu")
             return data["means"], data["stds"]
         else:
-            print(f"Generating and caching: {file_path}")
+            print(f"LR Emb: Generating and caching: {file_path}")
             return self._generate_and_save(file_path)
 
     def _generate_and_save(self, file_path):
         g = torch.Generator()
-        g.manual_seed(self.seed)
+        g.manual_seed(42)
 
         low_res_means = torch.randn(
             self.num_classes, self.C, self.low_res_dim, self.low_res_dim, 
@@ -146,26 +156,30 @@ class LowRankEmbedding(BaseEmbedding):
 
 
 class ClipEmbedding(BaseEmbedding):
-    def __init__(self, H, W, C, num_classes, std_scale, 
+    def __init__(self, H, W, C, num_classes, std_scale, dataset_name="mnist",
                  model_name="openai/clip-vit-base-patch32", clip_device="cpu"):
         super().__init__(H, W, C, num_classes, std_scale)
         from transformers import CLIPTokenizer, CLIPTextModel
 
         tokenizer = CLIPTokenizer.from_pretrained(model_name)
         model = CLIPTextModel.from_pretrained(model_name).to(clip_device)
-        
-        defaults = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
-        if num_classes > len(defaults):
-            raise ValueError(f"only 10 classes supported, got {num_classes}")
-        labels_txt = defaults[:num_classes]
+        g = torch.Generator().manual_seed(42)
 
+        if dataset_name == "mnist":
+            label_texts = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"]
+        elif dataset_name == "cifar":
+            label_texts = ["Airplane", "Automobile", "Bird", "Cat", "Deer", "Dog", "Frog", "Horse", "Ship", "Truck"]
+        else:
+            raise ValueError("Only mnist and cifar10 datasets are currently supported for CLIP embeddings")
+
+        labels_txt = label_texts[:num_classes]
         inputs = tokenizer(labels_txt, padding=True, return_tensors="pt").to(clip_device)
         with torch.no_grad():
             outputs = model(**inputs)
-        text_embeds = outputs.pooler_output  # (N, 512)
+        text_embeds = outputs.pooler_output
 
         D = H * W * C
-        A = torch.randn(D, 512, device=clip_device)
+        A = torch.randn(D, 512, device=clip_device, generator=g)
         Q, _ = torch.linalg.qr(A, mode='reduced')
         P = Q[:, :512]
         

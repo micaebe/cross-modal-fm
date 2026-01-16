@@ -1,195 +1,89 @@
-import argparse
-from pathlib import Path
-import json
 import torch
-from datetime import datetime
-from models.dit import DiT_Llama
-from models.fast_dit import DiT
-from models.unet import UNetModel
-from dataset.build_dataset import get_dataset_info
+from hydra.utils import instantiate
+from torch.optim.lr_scheduler import LambdaLR
 from embeddings.build_embeddings import build_embedding_provider
+from dataset.build_dataset import build_dataloaders
+from evaluation.train_classifier import Classifier
 from utils import load_checkpoint
-from rf import RF
+from models.utils import EMA
 
-# probably would make sense to use e.g. hydra
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--project_name", type=str, default="runs")
+def _is_cross_modal(cfg):
+    return cfg.mode.source == "label" or cfg.mode.target == "label"
 
-    # Model args
-    parser.add_argument("--model", type=str, default="DiT", choices=["DiT_Llama", "DiT", "UNet"], help="Model architecture")
-    parser.add_argument("--dim", type=int, default=128, help="Model dimension (in case of UNet its the number of channels)")
-    parser.add_argument("--n_layers", type=int, default=4, help="Number of layers")
-    parser.add_argument("--n_heads", type=int, default=2, help="Number of attention heads (only for transformer based models)")
-    parser.add_argument("--patch_size", type=int, default=4, help="Patch size (only for transformer based models)")
-    parser.add_argument("--channel_mult", type=str, default="1,2,4,8", help="Channel multipliers for UNet, eg. '1,2,4,8'")
-    parser.add_argument("--bidirectional", action="store_true", help="Use bidirectional flow matching")
-    parser.add_argument("--lambda_b", type=float, default=0.5, help="Weighting for bidirectional flow matching (between 0 and 1, where the endpoints are unidirectional models)")
-    parser.add_argument("--cls_dropout", type=float, default=0.1, help="Dropout rate for class conditioning")
+def _get_model_internal_cls_dropout_prob(cfg):
+    if cfg.use_conditioning and _is_cross_modal(cfg):
+        return cfg.rf.cls_dropout_prob
+    return 0.0
 
-    # Training args
-    parser.add_argument("--total_steps", type=int, default=100_000, help="Total number of training steps.")
-    parser.add_argument("--checkpoint_every_steps", type=int, default=2000, help="Checkpointing and evaluation frequency in steps.")
-    
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--lr", type=float, default=5e-4)
-    parser.add_argument("--lr_warmup_steps", type=int, default=1000, help="Number of lr warmup steps")
+def _get_model_internal_num_classes(cfg):
+    if cfg.use_conditioning and _is_cross_modal(cfg):
+        return cfg.dataset.num_classes
+    return 2
 
-    parser.add_argument("--weight_decay", type=float, default=0.0)
-    parser.add_argument("--adam_beta2", type=float, default=0.995)
-    parser.add_argument("--ema_decay", type=float, default=0.9995)
-    parser.add_argument("--ema_warmup_steps", type=int, default=1000, help="Number of warmup steps for EMA")
+def build_rf(cfg):
+    """
+    Builds the RF class, should be used to instantiate the RF class
+    """
+    if cfg.mode.source == cfg.mode.target:
+        raise ValueError("Source and target cannot be the same")
+    H = cfg.dataset.image_size
+    C = cfg.dataset.channels
+    num_classes = cfg.dataset.num_classes
 
-    parser.add_argument("--compile_model", action="store_true", help="Use torch.compile on the model")
-    parser.add_argument("--mixed_precision", action="store_true", help="Use mixed precision training with bfloat16")
-    parser.add_argument("--grad_accum_steps", type=int, default=1, help="Gradient accumulation steps (1 = no accumulation)")
+    num_classes_model = _get_model_internal_num_classes(cfg)
+    cls_dropout_prob_model = _get_model_internal_cls_dropout_prob(cfg)
 
-    # Eval args (eval during training)
-    parser.add_argument("--eval_batch_size", type=int, default=4)
-    parser.add_argument("--eval_batches", type=int, default=30)
-    parser.add_argument("--eval_cfg_scale", type=float, default=1.0)
-    parser.add_argument("--eval_integration_steps", type=int, default=40)
+    model = instantiate(
+        cfg.model,
+        num_classes=num_classes_model,
+        class_dropout_prob=cls_dropout_prob_model,
+    )
+    model.to(cfg.device)
 
-    # Data args
-    parser.add_argument("--source", type=str, default="label", choices=["label", "noise", "image"])
-    parser.add_argument("--target", type=str, default="image", choices=["label", "noise", "image"])
-    parser.add_argument("--label_embedding", type=str, default="rectangle", choices=["grayscale", "clip", "rectangle", "low_rank"])
-    parser.add_argument("--embedding_std_scale", type=float, default=0.1)
-    parser.add_argument("--use_conditioning", action="store_true", help="Use class conditioning inside DiT")
-
-    parser.add_argument("--dataset", type=str, default="mnist", choices=["mnist", "cifar", "imagenet100"])
-    parser.add_argument("--data_dir", default="./flowmatch/vae_mds_100", help="Path to imagenet dataset")
-
-    # Path args
-    parser.add_argument("--use_ln", action="store_true", help="Use logit normal time sampling")
-    parser.add_argument("--ln_loc", type=float, default=0.0, help="Logit normal location parameter")
-    parser.add_argument("--ln_scale", type=float, default=1.0, help="Logit normal scale parameter")
-
-
-    parser.add_argument("--classifier_path", type=str, default="", help="Path to pretrained classifier for evaluation (optional)")
-    parser.add_argument("--fid_ref_dir", type=str, default=None, help="Path to reference images for FID calculation (imagenet)")
-    parser.add_argument("--project", type=str, default="")
-    parser.add_argument("--resume_checkpoint", type=str, default="", help="Path to checkpoint to resume from")
-
-
-    return parser.parse_args()
-
-
-def setup_run(args):
-    if args.resume_checkpoint:
-        run_dir = Path(args.resume_checkpoint).parent
-        print(f"Resuming experiment in: {run_dir}")
-        with open(run_dir / "config.json", "r") as f:
-            checkpoint_args = json.load(f)
-        preserve_keys = ["resume_checkpoint", "device", "total_steps"]
-        for k, v in checkpoint_args.items():
-            if k not in preserve_keys:
-                setattr(args, k, v)
-    else:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-        noise_str = str(args.embedding_std_scale).replace(".", "_")
-        run_name = f"{timestamp}_{args.dataset}_{noise_str}"
-        if not args.bidirectional:
-            run_name += f"_{args.source}_{args.target}"
-        else:
-            run_name += "_bidir"
-        run_dir = Path(args.project_name) / run_name
-        run_dir.mkdir(parents=True, exist_ok=True)
-        print(f"Starting new experiment in: {run_dir}")
-        with open(run_dir / "config.json", "w") as f:
-            json.dump(vars(args), f, indent=4)
-    return run_dir, args
-
-
-
-def _get_model_internal_cls_dropout_prob(args):
-    # if we have as source or target "label"
-    # then we apply the class dropout outside of the model
-    if args.source == "label" or args.target == "label":
-        return 0.0
-    return args.class_dropout_prob
-
-def build_rf(args):
-    H, W, C, num_classes = get_dataset_info(args)
-    num_classes_model = num_classes
-    if not args.use_conditioning:
-        # if we dont use the class embeddings for conditioning, we use them as indicator function for cfg
-        num_classes_model = 2
-    cls_dropout_prob_model = _get_model_internal_cls_dropout_prob(args)
-
-    if args.model == "DiT_Llama":
-        model = DiT_Llama(
-            in_channels=C,
-            input_size=H,
-            patch_size=args.patch_size,
-            dim=args.dim,
-            n_layers=args.n_layers,
-            n_heads=args.n_heads,
-            class_dropout_prob=cls_dropout_prob_model,
-            num_classes=num_classes_model,
-            bidirectional=args.bidirectional,
-        )
-    elif args.model == "DiT":
-        model = DiT(
-            in_channels=C,
-            input_size=H,
-            patch_size=args.patch_size,
-            hidden_size=args.dim,
-            depth=args.n_layers,
-            num_heads=args.n_heads,
-            class_dropout_prob=cls_dropout_prob_model,
-            num_classes=num_classes_model,
-            bidirectional=args.bidirectional,
-        )
-    elif args.model == "UNet":
-       model = UNetModel(
-           image_size=H,
-           in_channels=C,
-           model_channels=args.dim,
-           out_channels=C,
-           num_res_blocks=args.n_layers,
-           num_classes=num_classes_model,
-           channel_mult=tuple(map(int, args.channel_mult.split(","))),
-           attention_resolutions=[2, 4],
-           bidirectional=args.bidirectional,
-       )
-    device = args.device
-    model.to(device)
-
-    if device == "cuda" and args.compile_model:
-        model = torch.compile(model)
+    if cfg.device == "cuda" and cfg.compile_model:
+        model = torch.compile(model, mode="max-autotune")
 
     label_embedder = None
-    if args.source != "noise" and args.target != "noise":
-        # if dataset is imagenet100, we have 4 codes, if its mnist or cifar we have 1 code
-        codes_per_cell = 4
-        if args.dataset in ["mnist", "cifar"]:
-            codes_per_cell = 2
+    if _is_cross_modal(cfg):
+        label_embedder = instantiate(cfg.label_embedding)
+        label_embedder.to(cfg.device)
 
-        label_embedder = build_embedding_provider(args.label_embedding,
-                                                  H=H,
-                                                  W=W,
-                                                  C=C,
-                                                  num_classes=num_classes,
-                                                  std_scale=args.embedding_std_scale,
-                                                  blur_sigma=1.0,                   # only used if embedding is "rectangle"
-                                                  codes_per_cell=codes_per_cell)    # only used if embedding is "rectangle"
-        label_embedder.to(device)
-
-    rf = RF(
+    rf = instantiate(
+        cfg.rf,
         model=model,
-        ln=args.use_ln,
-        ln_loc=args.ln_loc,
-        ln_scale=args.ln_scale,
-        source=args.source,
-        target=args.target,
         label_embedder=label_embedder,
-        img_dim=(H, W, C),
-        lambda_b=args.lambda_b,
-        bidirectional=args.bidirectional,
-        cfg_dropout_prob=args.cls_dropout,
-        use_conditioning=args.use_conditioning
+        use_conditioning=False if _is_cross_modal(cfg) else cfg.use_conditioning
     )
     return rf
+
+
+def setup(rf, cfg):
+    ema = EMA(rf.model, decay=cfg.ema_decay, warmup_steps=cfg.ema_warmup_steps)
+    scheduler = None
+    optimizer = instantiate(cfg.optimizer, params=rf.model.parameters())
+
+    if cfg.lr_warmup_steps > 0:
+        warmup_steps = cfg.lr_warmup_steps
+        def lr_lambda(current_step):
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            return 1.0
+        scheduler = LambdaLR(optimizer, lr_lambda)
+
+    if cfg.resume_checkpoint:
+        global_step = load_checkpoint(rf.model, optimizer, ema, scheduler, cfg.resume_checkpoint)
+        global_step += 1
+        print(f"Resuming from checkpoint: {cfg.resume_checkpoint} at step {global_step}")
+    else:
+        global_step = 0
+
+    train_loader, test_loader = build_dataloaders(cfg)
+
+    classifier = None
+    if cfg.classifier_path:
+        C = cfg.dataset.channels
+        classifier = Classifier(in_channels=C).to(cfg.device)
+        classifier.load_state_dict(torch.load(cfg.classifier_path, map_location=cfg.device))
+        classifier.eval()
+
+    return ema, optimizer, scheduler, global_step, train_loader, test_loader, classifier
