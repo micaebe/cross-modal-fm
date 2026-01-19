@@ -1,7 +1,17 @@
 import torch
 from torchdiffeq import odeint
-from label_embeddings import build_embedding_provider
-from dit import DiT_Llama
+
+from flowmatch.label_embeddings import (
+    RectangleEmbedding,
+    OrthoEmbedding,
+    GrayScaleEmbedding,
+    ClipEmbedding,
+)
+
+
+
+from flowmatch.dit import DiT_Llama
+
 
 
 # RF class from: https://github.com/cloneofsimo/minRF/blob/main/rf.py

@@ -1,6 +1,6 @@
 import torch
-from rf import RF
-from utils import nearest_labels, log_full_grads
+from flowmatch.rf import RF
+from flowmatch.utils import nearest_labels, log_full_grads
 from torchvision.utils import make_grid
 from einops import rearrange
 import numpy as np
