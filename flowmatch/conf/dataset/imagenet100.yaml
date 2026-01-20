@@ -1,0 +1,5 @@
+name: imagenet100
+data_dir: "./data/vae_mds_100"
+image_size: 32
+channels: 4
+num_classes: 100

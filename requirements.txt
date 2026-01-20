@@ -3,4 +3,12 @@ wandb
 torchdiffeq
 torch
 torchvision
-torch-fidelity
+clean-fid
+prdc
+hf_transfer
+mosaicml-streaming
+timm
+tensorboard
+hydra-core
+omegaconf
+diffusers

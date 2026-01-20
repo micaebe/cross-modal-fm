@@ -1,0 +1,55 @@
+# @package _global_
+defaults:
+  - override /dataset: mnist
+  - override /model: UNet
+  - override /mode: l2i
+
+project_name: cifar_ablations
+seed: 42
+device: cuda
+
+use_conditioning: false
+
+model:
+  model_channels: 32
+  num_res_blocks: 1
+  channel_mult: [1, 1]
+  attention_resolutions: [16, 8]
+  dropout: 0.1
+  use_scale_shift_norm: true
+
+optimizer:
+  lr: 1e-4
+  weight_decay: 0.0
+  betas: [0.9, 0.999]
+
+rf:
+  _target_: rf.RF 
+  ln: false
+  ln_loc: 0.0
+  ln_scale: 1.0
+  lambda_b: 0.5
+  cls_dropout_prob: 0.1
+  stochastic_interpolant_scale: 0.0
+
+
+# training args
+total_steps: 240000
+checkpoint_every_steps: 2
+eval_every_steps: 40000
+lr_warmup_steps: 12000
+batch_size: 16
+max_grad_norm: 5.0
+
+ema_decay: 0.9999
+ema_warmup_steps: 24000
+
+compile_model: false
+mixed_precision: true
+grad_accum_steps: 1
+
+eval_batch_size: 10
+eval_batches: 5
+eval_cfg_scale: 1.0
+eval_integration_steps: 40
+classifier_path: "" #cifar_classifier.pth

@@ -1,0 +1,4 @@
+name: cifar
+image_size: 32
+channels: 3
+num_classes: 10
