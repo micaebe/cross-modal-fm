@@ -18,7 +18,6 @@ def train_rf(rf: RF,
             logger,
             global_step,
             use_bf16=False,
-            grad_accum_steps=1,
             max_grad_norm=None,
             scheduler=None):
     rf.model.train()
@@ -27,7 +26,7 @@ def train_rf(rf: RF,
 
     optimizer.zero_grad(set_to_none=True)
 
-    for i in range(num_steps * grad_accum_steps):
+    for i in range(num_steps):
         try:
             x, y = next(data_iterator)
         except StopIteration:
@@ -39,25 +38,23 @@ def train_rf(rf: RF,
         sample_mse, t, _ = rf_forward_fn(rf, x, y, use_bf16, device)
         loss = sample_mse.mean()
         
-        loss = loss / grad_accum_steps
         loss.backward()
 
-        if (i + 1) % grad_accum_steps == 0:
-            grad_norm = torch.nn.utils.clip_grad_norm_(
-                    rf.model.parameters(), max_norm=max_grad_norm
-            )
-            optimizer.step()
-            if scheduler is not None:
-                scheduler.step()
-            
-            optimizer.zero_grad(set_to_none=True)
-            ema.update(rf.model)
-            
-            if (i + 1) % (grad_accum_steps * 5) == 0:
-                logger.add_scalar("Train/Loss", loss.item() * grad_accum_steps, global_step)
-                logger.add_scalar("Train/Grad_Norm", grad_norm, global_step)
-                logger.add_scalar("Train/LR", optimizer.param_groups[0]["lr"], global_step)
-            global_step += 1
-        running += loss.item() * grad_accum_steps
-    return running / (num_steps * grad_accum_steps), global_step
+        grad_norm = torch.nn.utils.clip_grad_norm_(
+                rf.model.parameters(), max_norm=max_grad_norm
+        )
+        optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
+        
+        optimizer.zero_grad(set_to_none=True)
+        ema.update(rf.model)
+        
+        if (i + 1) % 5 == 0:
+            logger.add_scalar("Train/Loss", loss.item(), global_step)
+            logger.add_scalar("Train/Grad_Norm", grad_norm, global_step)
+            logger.add_scalar("Train/LR", optimizer.param_groups[0]["lr"], global_step)
+        global_step += 1
+        running += loss.item()
+    return running / num_steps, global_step
 

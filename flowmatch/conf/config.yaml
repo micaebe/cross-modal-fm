@@ -58,7 +58,6 @@ ema_warmup_steps: 10000
 
 compile_model: true # does currently not work with UNet
 mixed_precision: true
-grad_accum_steps: 1
 
 # eval during training
 eval_batch_size: 100

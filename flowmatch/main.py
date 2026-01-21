@@ -52,7 +52,6 @@ def main(cfg: DictConfig):
             device=cfg.device,
             use_bf16=cfg.mixed_precision,
             num_steps=cfg.eval_every_steps,
-            grad_accum_steps=cfg.grad_accum_steps,
             max_grad_norm=cfg.max_grad_norm,
             scheduler=scheduler,
             logger=logger,
