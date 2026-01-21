@@ -175,14 +175,7 @@ class DiT(nn.Module):
 
         # Modified: bidirectional embedding
         if self.bidirectional:
-            self.bidir_embedder = nn.Embedding(2, 128)
-            self.bidir_adapter = nn.Sequential(
-                nn.Linear(hidden_size + 128, hidden_size // 2),
-                nn.SiLU(),
-                nn.Linear(hidden_size // 2, hidden_size)
-            )
-            nn.init.constant_(self.bidir_adapter[-1].weight, 0)
-            nn.init.constant_(self.bidir_adapter[-1].bias, 0)
+            self.bidir_embedder = nn.Embedding(2, hidden_size)
             nn.init.normal_(self.bidir_embedder.weight, std=0.02)
 
         num_patches = self.x_embedder.num_patches
@@ -268,7 +261,7 @@ class DiT(nn.Module):
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y  # (N, D)
         if self.bidirectional: # Modified: bidirectional conditioning
-            bidir_emb = self.bidir_adapter(torch.cat([t, self.bidir_embedder(bidir_cond)], dim=1))  # (N, D)
+            bidir_emb = self.bidir_embedder(bidir_cond)  # (N, D)
             c = c + bidir_emb
 
         for block in self.blocks:

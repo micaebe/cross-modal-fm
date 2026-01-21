@@ -623,14 +623,7 @@ class UNetModel(nn.Module):
             self.label_emb = nn.Embedding(num_classes, time_embed_dim)
         # Modified: bidirectional embedding
         if self.bidirectional:
-            self.bidir_embedder = nn.Embedding(2, 128)
-            self.bidir_adapter = nn.Sequential(
-                nn.Linear(time_embed_dim + 128, time_embed_dim // 2),
-                nn.SiLU(),
-                nn.Linear(time_embed_dim // 2, time_embed_dim)
-            )
-            nn.init.constant_(self.bidir_adapter[-1].weight, 0)
-            nn.init.constant_(self.bidir_adapter[-1].bias, 0)
+            self.bidir_embedder = nn.Embedding(2, time_embed_dim)
             nn.init.normal_(self.bidir_embedder.weight, std=0.02)
 
         ch = input_ch = int(channel_mult[0] * model_channels)
@@ -811,7 +804,7 @@ class UNetModel(nn.Module):
             assert y.shape == (x.shape[0],)
             emb = emb + self.label_emb(y)
         if self.bidirectional:
-            bidir_emb = self.bidir_adapter(th.cat([t, self.bidir_embedder(bidir_cond)], dim=1))
+            bidir_emb = self.bidir_embedder(bidir_cond)
             emb = emb + bidir_emb
 
         h = x.type(self.dtype)
