@@ -1,11 +1,10 @@
 import torch
 from hydra.utils import instantiate
 from torch.optim.lr_scheduler import LambdaLR
-from embeddings.build_embeddings import build_embedding_provider
-from dataset.build_dataset import build_dataloaders
-from evaluation.train_classifier import Classifier
-from utils import load_checkpoint
-from models.utils import EMA
+from .dataset.build_dataset import build_dataloaders
+from .evaluation.train_classifier import Classifier
+from .utils import load_checkpoint
+from .models.utils import EMA
 
 def _is_cross_modal(cfg):
     return cfg.mode.source == "label" or cfg.mode.target == "label"
@@ -42,7 +41,7 @@ def build_rf(cfg):
 
     label_embedder = None
     if _is_cross_modal(cfg):
-        label_embedder = instantiate(cfg.label_embedding)
+        label_embedder = instantiate(cfg.embeddings)
         label_embedder.to(cfg.device)
 
     rf = instantiate(

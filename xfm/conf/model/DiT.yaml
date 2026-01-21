@@ -1,4 +1,4 @@
-_target_: models.fast_dit.DiT
+_target_: xfm.models.fast_dit.DiT
 
 patch_size: 2
 hidden_size: 64 # 384

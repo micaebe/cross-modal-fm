@@ -1,4 +1,4 @@
-_target_: models.unet.UNetModel
+_target_: xfm.models.unet.UNetModel
 
 model_channels: 128
 num_res_blocks: 2

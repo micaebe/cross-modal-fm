@@ -34,8 +34,5 @@ hydra:
     subdir: ${hydra.job.override_dirname}
   sweeper:
     params:
-      label_embedding.name: rectangle
-      label_embedding.std_scale: 0.5, 1.0
-      label_embedding.ln: true
-      label_embedding.ln_scale: 1.0
-      label_embedding.ln_loc: 0.0, -0.5, 0.5
+      label_embedding.name: rectangle, smoothrand, grayscale
+      label_embedding.std_scale: 1.0, 0.5

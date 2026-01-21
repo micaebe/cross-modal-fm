@@ -6,8 +6,8 @@ from cleanfid.resize import build_resizer
 from torchvision.utils import make_grid
 from einops import rearrange
 from PIL import Image
-from rf import RF
-from utils import nearest_labels
+from ..rf import RF
+from ..utils import nearest_labels
 from pathlib import Path
 import os
 

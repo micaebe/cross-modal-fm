@@ -1,4 +1,4 @@
-from embeddings.label_embeddings import GrayScaleEmbedding, RectangleEmbedding, ClipEmbedding, SmoothRandom
+from .label_embeddings import GrayScaleEmbedding, RectangleEmbedding, ClipEmbedding, SmoothRandom
 import inspect
 
 EMBEDDINGS = {

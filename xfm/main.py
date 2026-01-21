@@ -1,15 +1,15 @@
-import torch
-from config import build_rf, setup
-from utils import set_seed, save_checkpoint
-from train import train_rf
-from evaluation.evaluation_utils import get_fid_components, get_real_features_for_dataset, get_vae, evaluate
-from config import build_rf
-from torch.utils.tensorboard import SummaryWriter
 import time
+import torch
 import hydra
 from pathlib import Path
 from omegaconf import DictConfig
 from hydra.core.hydra_config import HydraConfig
+from torch.utils.tensorboard import SummaryWriter
+from .config import build_rf, setup
+from .utils import set_seed, save_checkpoint
+from .train import train_rf
+from .evaluation.evaluation_utils import get_fid_components, get_real_features_for_dataset, get_vae, evaluate
+
 
 torch.set_float32_matmul_precision('high')
 torch.backends.cudnn.allow_tf32 = True
@@ -23,7 +23,7 @@ def main(cfg: DictConfig):
 
     rf = build_rf(cfg)
     ema, optimizer, scheduler, global_step, train_loader, test_loader, classifier = setup(rf, cfg)
-    print(f"Device: {cfg.device} | Dataset: {cfg.dataset.name} | Source: {cfg.mode.source} | Target: {cfg.mode.target} | Bidirectional: {cfg.mode.bidirectional} | Use Conditioning: {cfg.use_conditioning} | Label Embedding: {cfg.label_embedding.name} | Embedding Std Scale: {cfg.label_embedding.std_scale} | Use LN: {cfg.rf.ln} | LN Loc: {cfg.rf.ln_loc} | LN Scale: {cfg.rf.ln_scale} | Use mixed preicision: {cfg.mixed_precision}")
+    print(f"Device: {cfg.device} | Dataset: {cfg.dataset.name} | Source: {cfg.mode.source} | Target: {cfg.mode.target} | Bidirectional: {cfg.mode.bidirectional} | Use Conditioning: {cfg.use_conditioning} | Label Embedding: {cfg.embeddings.name} | Embedding Std Scale: {cfg.embeddings.std_scale} | Use LN: {cfg.rf.ln} | LN Loc: {cfg.rf.ln_loc} | LN Scale: {cfg.rf.ln_scale} | Use mixed preicision: {cfg.mixed_precision}")
     total_params = sum(p.numel() for p in rf.model.parameters() if p.requires_grad)
     print(f"Trainable parameters: {total_params}")
 

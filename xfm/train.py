@@ -1,5 +1,5 @@
 import torch
-from rf import RF
+from .rf import RF
 
 
 def rf_forward_fn(rf: RF, x, y, use_bf16, device, t=None, bidi_mask=None):
