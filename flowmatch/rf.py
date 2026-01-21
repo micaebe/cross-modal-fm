@@ -151,9 +151,7 @@ class RF:
         b = z.size(0)
 
         t0, t1 = (0.0, 1.0)
-        if direction == "backward":
-            t0, t1 = (1.0, 0.0)
-        if self.bidirectional and invert_time:
+        if (direction == "backward" and not self.bidirectional) or (self.bidirectional and invert_time):
             t0, t1 = (1.0, 0.0)
 
         bidi_mask = None
