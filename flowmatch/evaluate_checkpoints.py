@@ -1,37 +1,38 @@
 import torch
 import re
+from pathlib import Path
 from config import build_rf
 from dataset.build_dataset import build_dataloaders
 from utils import set_seed, load_checkpoint
 from evaluation.evaluation_utils import get_fid_components, get_real_features_for_dataset, get_vae, evaluate
-from config import build_rf
 from torch.utils.tensorboard import SummaryWriter
 import hydra
-from pathlib import Path
-from omegaconf import DictConfig, open_dict
-from hydra.core.hydra_config import HydraConfig
+from omegaconf import DictConfig, OmegaConf
 
 torch.set_float32_matmul_precision('high')
 torch.backends.cudnn.allow_tf32 = True
 
+
 @hydra.main(version_base=None, config_path="./conf", config_name="config")
 def main(cfg: DictConfig):
-    if "evaluation" not in cfg:
-        print("Warning: 'evaluation' not found in config. Using defaults.")
-        with open_dict(cfg):
-            cfg.evaluation = {
-                "eval_batches": 50,
-                "eval_batch_size": 100,
-                "use_test_set": True,
-                "only_final": False,
-                "cfg_scales": [1.0],
-                "eval_integration_steps": [40]
-            }
+    if "run_dir" not in cfg or cfg.run_dir is None:
+        return
+    run_dir = Path(cfg.run_dir)
+    saved_config_path = run_dir / ".hydra" / "config.yaml"
 
-    set_seed(cfg.seed)
+    if not saved_config_path.exists():
+        print(f"No config found at {saved_config_path}.")
+        return
     
-    run_dir = Path(HydraConfig.get().runtime.output_dir)
-    logger = SummaryWriter(log_dir=run_dir)
+    print(f"Loading config from {saved_config_path}")
+    saved_cfg = OmegaConf.load(saved_config_path)
+    eval_overrides = cfg.get("evaluation", {})
+    cfg = OmegaConf.merge(saved_cfg, {"evaluation": eval_overrides})
+    set_seed(cfg.seed)
+
+    eval_output_dir = run_dir / "evaluation"
+    eval_output_dir.mkdir(parents=True, exist_ok=True)
+    logger = SummaryWriter(log_dir=eval_output_dir)
 
     rf = build_rf(cfg)
     train_loader, test_loader = build_dataloaders(cfg)
@@ -48,18 +49,19 @@ def main(cfg: DictConfig):
     if vae:
         vae.to("cpu")
 
-    if not "checkpoint_dir" in cfg:
-        print("No checkpoint_dir provided")
-        return
-
     checkpoint_paths = sorted(
-        Path(cfg.checkpoint_dir).glob("*.pt"),
+        run_dir.glob("*.pt"),
         key=lambda p: int(re.search(r'\d+', p.name).group())
     )
+
+    if not checkpoint_paths:
+        print(f"No .pt files found in {run_dir}")
+        return
+
     if cfg.evaluation.only_final:
         checkpoint_paths = checkpoint_paths[-1:]
 
-    print(f"Found {len(checkpoint_paths)} checkpoints to evaluate in {cfg.checkpoint_dir}")
+    print(f"Found {len(checkpoint_paths)} checkpoint(s) to evaluate in {run_dir}")
 
     for i, checkpoint_path in enumerate(checkpoint_paths):
         print(f"Processing {checkpoint_path.name}")
@@ -75,7 +77,7 @@ def main(cfg: DictConfig):
                     steps=eval_integration_step,
                     cfg_scale=cfg_scale,
                     n_batches=cfg.evaluation.eval_batches,
-                    save_dir=run_dir / "evaluation_samples",
+                    save_dir=eval_output_dir / "samples",
                     classifier=None,
                     epoch=i,
                     fid_model=fid_model,
@@ -86,14 +88,15 @@ def main(cfg: DictConfig):
                     save_gif=True,
                     save_samples=True
                 )
-
-                settings_tag = f"cfg{cfg_scale}_steps{eval_integration_step}"
                 for key, value in metrics.items():
                     name = key.upper() if key == "fid" else key.replace("_", " ").title().replace(" ", "_")
-                    tag = f"Test/{name}/{settings_tag}"
-                    logger.add_scalar(tag, value, global_step)
+                    full_name = f"Test/{name}/{cfg_scale}/{eval_integration_step}"
+                    logger.add_scalar(full_name, value, global_step)
+                    print(f"{full_name}: {value}")
 
-    logger.flush()
+        logger.flush()
+    logger.close()
+
 
 if __name__ == "__main__":
     main()
