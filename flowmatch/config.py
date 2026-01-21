@@ -26,9 +26,6 @@ def build_rf(cfg):
     """
     if cfg.mode.source == cfg.mode.target:
         raise ValueError("Source and target cannot be the same")
-    H = cfg.dataset.image_size
-    C = cfg.dataset.channels
-    num_classes = cfg.dataset.num_classes
 
     num_classes_model = _get_model_internal_num_classes(cfg)
     cls_dropout_prob_model = _get_model_internal_cls_dropout_prob(cfg)
