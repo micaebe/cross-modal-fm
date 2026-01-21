@@ -38,7 +38,7 @@ class TimestepEmbedder(nn.Module):
         self.frequency_embedding_size = frequency_embedding_size
 
     @staticmethod
-    def timestep_embedding(t, dim, max_period=10000):
+    def timestep_embedding(t, dim, max_period=10000, time_factor=1000.0):
         """
         Create sinusoidal timestep embeddings.
         :param t: a 1-D Tensor of N indices, one per batch element.
@@ -47,6 +47,8 @@ class TimestepEmbedder(nn.Module):
         :param max_period: controls the minimum frequency of the embeddings.
         :return: an (N, D) Tensor of positional embeddings.
         """
+        # Scale up time-steps to 0-1000 range as done in e.g. https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
+        t = t * time_factor
         # https://github.com/openai/glide-text2im/blob/main/glide_text2im/nn.py
         half = dim // 2
         freqs = torch.exp(
@@ -255,8 +257,6 @@ class DiT(nn.Module):
         bidir_cond: (N,) tensor of bidirectional conditioning (0 for forward, 1 for backward), if bidirectional is enabled
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
-        # added scaling of time-step in case we get 0-1 range
-        t = t * 1000 if t.max() <= 1.0 else t
         t = self.t_embedder(t)                   # (N, D)
         y = self.y_embedder(y, self.training)    # (N, D)
         c = t + y  # (N, D)

@@ -140,7 +140,7 @@ def normalization(channels):
     return GroupNorm32(32, channels)
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
+def timestep_embedding(timesteps, dim, max_period=10000, time_factor=1000.0):
     """
     Create sinusoidal timestep embeddings.
 
@@ -150,6 +150,8 @@ def timestep_embedding(timesteps, dim, max_period=10000):
     :param max_period: controls the minimum frequency of the embeddings.
     :return: an [N x dim] Tensor of positional embeddings.
     """
+    # Scale up time-steps to 0-1000 range as done in e.g. https://github.com/black-forest-labs/flux/blob/main/src/flux/modules/layers.py
+    timesteps = timesteps * time_factor
     half = dim // 2
     freqs = th.exp(
         -math.log(max_period) * th.arange(start=0, end=half, dtype=th.float32) / half
@@ -796,8 +798,7 @@ class UNetModel(nn.Module):
         ), "must specify y if and only if the model is class-conditional"
 
         hs = []
-        t_input = timesteps * 1000.0 if timesteps.max() <= 1.0 else timesteps # added this to scale up timesteps from 0-1 range
-        t = self.time_embed(timestep_embedding(t_input, self.model_channels))
+        t = self.time_embed(timestep_embedding(timesteps, self.model_channels))
         emb = t
 
         if self.num_classes is not None:
