@@ -36,7 +36,7 @@ def get_batch_features(batch_tensor, fid_model, fid_resizer, device, vae=None):
     feats = fid.get_batch_features(resized_batch, fid_model, device=device)
     return feats
 
-def compute_metrics(gen_feats, real_feats, fid_stats=None):
+def compute_metrics(gen_feats, real_feats, fid_stats=None, labels=None):
     metrics = {}
     mu_gen = np.mean(gen_feats, axis=0)
     sigma_gen = np.cov(gen_feats, rowvar=False)
@@ -53,6 +53,16 @@ def compute_metrics(gen_feats, real_feats, fid_stats=None):
             sigma_real = np.cov(real_feats, rowvar=False)
             fid_score = fid.frechet_distance(mu_gen, sigma_gen, mu_real, sigma_real)
             metrics['fid'] = fid_score
+        # compute per class precision & recall (& coverage, density)
+        if labels is not None:
+            classes = np.unique(labels)
+            for c in classes:
+                gen_c = gen_feats[labels == c]
+                real_c = real_feats[labels == c]
+                if len(gen_c) > 6:
+                    prdc_c = prdc.compute_prdc(real_features=real_c, fake_features=gen_c, nearest_k=5)
+                    for key, val in prdc_c.items():
+                        metrics[f'{key}_class_{c}'] = val
     return metrics
 
 def get_real_features_for_dataset(loader, fid_model, fid_resizer, device, max_batches=None, vae=None):

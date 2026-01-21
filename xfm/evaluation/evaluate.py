@@ -34,6 +34,7 @@ def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_
     }
     all_count = 0
     all_gen_feats = []
+    all_labels = []
 
     def get_conds(y):
         if rf.use_conditioning:
@@ -76,6 +77,7 @@ def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_
                 image_final = to_image_space(image_final, vae)
             feats = get_batch_features(image_final, fid_model, fid_resizer, device, None)
             all_gen_feats.append(feats)
+            all_labels.append(y.cpu().numpy())
 
         batch_metrics = {
             "acc_class": count_image_correct,
@@ -117,7 +119,8 @@ def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_
 
     if all_gen_feats:
         gen_feats = np.concatenate(all_gen_feats, axis=0)
-        fid_prdc_metrics = compute_metrics(gen_feats, real_feats, fid_stats)
+        all_labels = np.concatenate(all_labels, axis=0)
+        fid_prdc_metrics = compute_metrics(gen_feats, real_feats, fid_stats, all_labels)
         metrics.update(fid_prdc_metrics)
 
     if vae:
