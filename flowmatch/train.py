@@ -20,18 +20,12 @@ def train_rf(rf: RF,
             use_bf16=False,
             grad_accum_steps=1,
             max_grad_norm=None,
-            scheduler=None,
-            log_t_loss=False):
+            scheduler=None):
     rf.model.train()
     running = 0.0
     max_grad_norm = float("inf") if max_grad_norm is None else max_grad_norm
 
     optimizer.zero_grad(set_to_none=True)
-
-    if log_t_loss:
-        n_tloss_bins = 10
-        t_bin_samples = 0
-        t_bins = {i: [] for i in range(n_tloss_bins)}
 
     for i in range(num_steps * grad_accum_steps):
         try:
@@ -63,19 +57,6 @@ def train_rf(rf: RF,
                 logger.add_scalar("Train/Loss", loss.item() * grad_accum_steps, global_step)
                 logger.add_scalar("Train/Grad_Norm", grad_norm, global_step)
                 logger.add_scalar("Train/LR", optimizer.param_groups[0]["lr"], global_step)
-                if log_t_loss:
-                    for t_, l_ in zip(t.detach().cpu().tolist(), sample_mse.detach().cpu().tolist()):
-                        bin_idx = int(t_ * n_tloss_bins)
-                        t_bins[bin_idx].append(l_)
-                    t_bin_samples += 1
-                    if t_bin_samples == 5:
-                        for bin_idx, losses in t_bins.items():
-                            logger.add_scalar(f"Train/T_Loss_Bin_{bin_idx}", sum(losses) / len(losses), global_step)
-                            # print pretty
-                            print(f"Train/T_Loss_Bin_{bin_idx}: {sum(losses) / len(losses)}")
-                        t_bins = {i: [] for i in range(n_tloss_bins)}
-                        t_bin_samples = 0
-
             global_step += 1
         running += loss.item() * grad_accum_steps
     return running / (num_steps * grad_accum_steps), global_step
