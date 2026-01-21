@@ -8,7 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 from .config import build_rf, setup
 from .utils import set_seed, save_checkpoint
 from .train import train_rf
-from .evaluation.evaluation_utils import get_fid_components, get_real_features_for_dataset, get_vae, evaluate
+from .evaluation.evaluate import evaluate
+from .evaluation.utils import get_fid_components, get_real_features_for_dataset, get_vae
 
 
 torch.set_float32_matmul_precision('high')

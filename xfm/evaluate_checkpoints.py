@@ -4,7 +4,8 @@ from pathlib import Path
 from .config import build_rf
 from .dataset.build_dataset import build_dataloaders
 from .utils import set_seed, load_checkpoint
-from .evaluation.evaluation_utils import get_fid_components, get_real_features_for_dataset, get_vae, evaluate
+from .evaluation.evaluate import evaluate
+from .evaluation.utils import get_fid_components, get_real_features_for_dataset, get_vae
 from torch.utils.tensorboard import SummaryWriter
 import hydra
 from omegaconf import DictConfig, OmegaConf

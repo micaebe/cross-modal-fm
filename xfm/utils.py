@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 import random
 import numpy as np
 
@@ -51,23 +50,4 @@ def load_checkpoint(model, optimizer, ema, scheduler, checkpoint_path, load_ema_
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
     return global_step
 
-# Label accuracy via nearest neighbor
-def nearest_labels_l2(final_states, means):
-    flat_states = final_states.flatten(start_dim=1)
-    flat_means = means.flatten(start_dim=1)
-    dists = torch.cdist(flat_states, flat_means, p=2)
-    preds = torch.argmin(dists, dim=1)
-    return preds, dists
-
-def nearest_labels_cos(final_states, means):
-    X = F.normalize(final_states.flatten(start_dim=1), p=2, dim=1, eps=1e-12)
-    M = F.normalize(means.flatten(start_dim=1), p=2, dim=1, eps=1e-12)
-    sims = X @ M.T
-    preds = sims.argmax(dim=1)
-    return preds, sims
-
-def nearest_labels(final_states, means):
-    preds_l2, dists_l2 = nearest_labels_l2(final_states, means)
-    preds_cos, sims_cos = nearest_labels_cos(final_states, means)
-    return preds_l2, preds_cos, dists_l2, sims_cos
 
