@@ -42,20 +42,17 @@ def build_dataset(cfg):
         print(f"Caching to: {local_cache_path}")
 
         ds_kwargs = dict(
-            #local=local_cache_path,
-            remote=cfg.dataset.data_dir,
             split=None,
             shuffle=True,
             shuffle_algo="py1s",
             shuffle_seed=cfg.seed,
-            num_canonical_nodes=1,
+            num_canonical_nodes=8,
             batch_size=cfg.batch_size,
-            shuffle_block_size=3000
+            shuffle_block_size=3000,
+            cache_limit=None
         )
-        # very hacky and inefficient workaround to avoid shared memory issues
         clean_stale_shared_memory()
-        # for FID calculation we use a fixed "eval" set from the training data
-        temp_ds = StreamingWrapperDataset(local=local_cache_path + "/temp", **ds_kwargs)
+        temp_ds = StreamingWrapperDataset(local=cfg.dataset.test_data_dir, **ds_kwargs)
         test_samples = []
         test_labels = []
         iter_ds = iter(temp_ds)
@@ -71,10 +68,10 @@ def build_dataset(cfg):
         test_x = torch.stack(test_samples)
         test_y = torch.tensor(test_labels)
         test_ds = TensorDataset(test_x, test_y)
-        del iter_ds
+        print(f"Using {len(test_ds)} samples for testing.")
         del temp_ds
         clean_stale_shared_memory()
-        train_ds = StreamingWrapperDataset(local=local_cache_path + "/train", **ds_kwargs)
+        train_ds = StreamingWrapperDataset(remote=cfg.dataset.data_dir, local=local_cache_path, **ds_kwargs)
     return train_ds, test_ds
 
 
