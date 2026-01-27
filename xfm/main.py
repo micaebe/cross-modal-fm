@@ -85,19 +85,8 @@ def main(cfg: DictConfig):
         ema.restore(rf.model)
 
         logger.add_scalar("Train/Avg_Loss", train_loss, global_step)
-        logger.add_scalar("Test/Acc_L2", metrics["acc_l2"], global_step)
-        logger.add_scalar("Test/Acc_Cos", metrics["acc_cos"], global_step)
-        logger.add_scalar("Test/Acc_Class", metrics["acc_class"], global_step)
-        logger.add_scalar("Test/Mean_L2", metrics["mean_l2"], global_step)
-        logger.add_scalar("Test/Mean_Cos", metrics["mean_cos"], global_step)
-        
-        if "fid" in metrics:
-             logger.add_scalar("Test/FID", metrics["fid"], global_step)
-        if "precision" in metrics:
-             logger.add_scalar("Test/Precision", metrics["precision"], global_step)
-             logger.add_scalar("Test/Recall", metrics["recall"], global_step)
-             logger.add_scalar("Test/Density", metrics["density"], global_step)
-             logger.add_scalar("Test/Coverage", metrics["coverage"], global_step)
+        for key, value in metrics.items():
+            logger.add_scalar(f"Test/{key}", value, global_step)
 
         print(f"Outer Step {outer_step:03d} | train_loss={train_loss:.4f} | "
               f"FID={metrics.get('fid', float('nan')):.2f} | "
