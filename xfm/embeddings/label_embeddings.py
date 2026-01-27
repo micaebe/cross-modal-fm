@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torchvision.transforms.functional import gaussian_blur
 from einops import rearrange, repeat
-import itertools
 import math
 import os
 
@@ -39,27 +38,35 @@ class GrayScaleEmbedding(BaseEmbedding):
 
 
 class RectangleEmbedding(BaseEmbedding):
-    def __init__(self, H, W, C, num_classes, std_scale, blur_sigma, codes_per_cell, patch_size=None):
-        """
-        Args:
-            patch_size: Optional tuple (patch_h, patch_w) or int for square patches. 
-                        If None, patches fill the grid cells (original behavior).
-        """
+    def __init__(self, H, W, C, num_classes, std_scale, blur_sigma, patch_size=None):
         super().__init__(H, W, C, num_classes, std_scale)
-        
-        codes_map = {
-            1: [1.0],
-            2: [-1.0, 1.0],
-        }
-        if codes_per_cell in codes_map:
-            code_list = [[v] * C for v in codes_map[codes_per_cell]]
-        else:
-            code_list = [list(x) for x in itertools. product([-1.0, 1.0], repeat=C)]
-
-        code_list = [torch.tensor(c, dtype=torch.float32) for c in code_list]
-        codes = torch.stack(code_list)
-        num_codes = len(codes)
-
+        # hardcoded codes for mnist, cifar & imagenet cases
+        if C == 1:
+            codes = torch.tensor([[-1.0], [1.0]])
+        elif C == 3:
+            codes = torch.tensor([
+                [-1.0, -1.0,  1.0],
+                [-1.0,  1.0, -1.0],
+                [ 1.0, -1.0, -1.0],
+                [ 1.0,  1.0,  1.0]
+            ])
+        elif C == 4:
+            codes = torch.tensor([
+                [-1, -1, -1,  1],
+                [-1, -1,  1, -1],
+                [-1, -1,  1,  1],
+                [-1,  1, -1, -1],
+                [-1,  1, -1,  1],
+                [-1,  1,  1, -1],
+                [ 1, -1, -1,  1],
+                [ 1, -1,  1, -1],
+                [ 1, -1,  1,  1],
+                [ 1,  1, -1, -1],
+                [ 1,  1, -1,  1],
+                [ 1,  1,  1, -1]
+            ])
+        codes = torch.stack([torch.tensor(c, dtype=torch.float32) for c in codes])
+        num_codes = codes.shape[0]
         num_cells = math.ceil(num_classes / num_codes)
         cols = math.ceil(math.sqrt(num_cells))
         rows = math.ceil(num_cells / cols)
@@ -75,10 +82,6 @@ class RectangleEmbedding(BaseEmbedding):
         else:
             patch_h, patch_w = patch_size
 
-        if num_codes * num_cells > num_classes:
-            codes = codes[:num_classes // num_cells]
-            num_codes = len(codes)
-
         print(f"Rect. Emb: Grid: {rows}x{cols} | Cell:  {cell_h:.2f}x{cell_w:.2f} | Patch: {patch_h}x{patch_w} | Num Codes: {num_codes}")
 
         means = torch.zeros(num_classes, C, H, W)
@@ -89,9 +92,11 @@ class RectangleEmbedding(BaseEmbedding):
             code_idx = i % num_codes
             
             r, c = divmod(cell_idx, cols)
-
+            is_last_row = (r == rows - 1)
+            items_in_this_row = (num_cells % cols) if (is_last_row and num_cells % cols != 0) else cols
+            row_cell_w = W / items_in_this_row
+            center_x = int((c + 0.5) * row_cell_w)
             center_y = int((r + 0.5) * cell_h)
-            center_x = int((c + 0.5) * cell_w)
 
             y0 = max(0, center_y - patch_h // 2)
             x0 = max(0, center_x - patch_w // 2)
@@ -189,4 +194,26 @@ class ClipEmbedding(BaseEmbedding):
         stds = torch.full((num_classes, C, H, W), std_scale, device=clip_device)
 
         self._setup(means, stds)
+
+
+
+if __name__ == "__main__":
+    from xfm.evaluation.utils import nearest_labels
+
+    rect_mnist = RectangleEmbedding(32, 32, 1, 10, 1.0, 2.0, 10)
+    rect_cifar = RectangleEmbedding(32, 32, 3, 10, 1.0, 2.0, 10)
+    rect_imagenet = RectangleEmbedding(32, 32, 4, 100, 1.0, 2.0, 10)
+    labels = torch.arange(10).repeat(1000)
+    label_inet = torch.arange(100).repeat(100)
+    for rect, labels, name in [(rect_mnist, labels, "MNIST"), (rect_cifar, labels, "CIFAR"), (rect_imagenet, label_inet, "Imagenet")]:
+        print(f"\n{name}:")
+        embs = rect(labels, True)
+        pred_l2, pred_cos, dist_l2, sim_cos = nearest_labels(embs, rect.class_means)
+        correct = (pred_cos == labels).sum().item()
+        class_sims = sim_cos.diag()
+        class_l2 = dist_l2.diag()
+        print(f"Correctly classified (Cosine): {correct} / {labels.size(0)}")
+        print(f"Mean cosine similarity to class prototype: {class_sims.mean().item()}")
+        print(f"Mean L2 distance to class prototype: {class_l2.mean().item()}")
+        print(f"Mean embedding: {embs.mean().item()}, Std embedding: {embs.std().item()}")
 
