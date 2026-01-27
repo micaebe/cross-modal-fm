@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - override /model: DiT
+  - override /dataset: mnist
+  - _self_
+
+
+model:
+  hidden_size: 128
+  depth: 8
+  num_heads: 4
+  patch_size: 2
+
+
+total_steps: 120000
+eval_every_steps: 10000
+
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: ${project_name}/sweeps/${now:%Y-%m-%d_%H-%M}_mnist_dir_ablations
+    subdir: ${hydra.job.override_dirname}
+  sweeper:
+    params:
+      mode: l2i, i2l, bidi

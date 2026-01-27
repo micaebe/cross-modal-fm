@@ -1,0 +1,9 @@
+_target_: xfm.models.fast_dit.DiT
+
+patch_size: 2
+hidden_size: 384
+depth: 12
+num_heads: 6
+input_size: ${dataset.image_size}
+in_channels: ${dataset.channels}
+bidirectional: ${mode.bidirectional}

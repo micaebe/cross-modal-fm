@@ -1,9 +1,0 @@
-_target_: models.fast_dit.DiT
-
-patch_size: 2
-hidden_size: 64 # 384
-depth: 3 #12
-num_heads: 2 #6
-input_size: ${dataset.image_size}
-in_channels: ${dataset.channels}
-bidirectional: ${mode.bidirectional}

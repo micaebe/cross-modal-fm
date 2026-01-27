@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /model: DiT
+  - override /dataset: cifar
+  - _self_
+
+
+model:
+  hidden_size: 256
+  depth: 12
+  num_heads: 4
+  patch_size: 2
+
+
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: ${project_name}/sweeps/${now:%Y-%m-%d_%H-%M}_cifar_dir_ablations
+    subdir: ${hydra.job.override_dirname}
+  sweeper:
+    params:
+      mode: l2i, i2l, bidi
