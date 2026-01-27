@@ -18,7 +18,7 @@ import os
 
 @torch.no_grad()
 def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_classes=10, save_dir: str | Path ="./eval_samples", classifier=None, epoch=0, 
-             fid_model=None, fid_resizer=None, fid_stats=None, real_feats=None, vae=None, save_gif=True, save_samples=True):
+             fid_model=None, fid_resizer=None, fid_stats=None, real_feats=None, vae=None, save_gif=True, save_samples=False):
     if vae:
         # we load vae only during evaluation onto gpu
         vae.to(device)
