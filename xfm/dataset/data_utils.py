@@ -3,6 +3,7 @@ from streaming import StreamingDataset
 from streaming.base.format.mds.encodings import Encoding, _encodings
 import numpy as np
 import torch
+import random
 
 
 class StreamingWrapperDataset(StreamingDataset):
@@ -23,6 +24,13 @@ class uint8(Encoding):
 
 _encodings["uint8"] = uint8
 
-def worker_init_fn(worker_id):
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+def imagenet_worker_init(worker_id):
+    seed_worker(worker_id)
     from streaming.base.format.mds.encodings import _encodings
     _encodings["uint8"] = uint8

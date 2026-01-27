@@ -29,7 +29,7 @@ def build_dataset(cfg):
         test_ds = datasets.CIFAR10(root="./data", train=False, download=True, transform=val_transform)
     elif cfg.dataset.name == "imagenet100":
         # from https://github.com/cloneofsimo/imagenet.int8
-        from dataset.data_utils import StreamingWrapperDataset
+        from .data_utils import StreamingWrapperDataset
         from streaming.base.util import clean_stale_shared_memory
 
         if "SLURM_JOB_ID" in os.environ:
@@ -80,11 +80,16 @@ def build_dataloaders(cfg):
     shuffle = True
     if cfg.dataset.name == "imagenet100":
         # in case of imagenet we dont shuffle in the dataloader but in the StreamingDataset
-        from dataset.data_utils import worker_init_fn
+        from .data_utils import imagenet_worker_init
         # worker init function is needed to convert from int8 to fp32
-        init_fn = worker_init_fn
+        init_fn = imagenet_worker_init
         shuffle = False
+    else:
+        from .data_utils import seed_worker
+        init_fn = seed_worker
     train_ds, test_ds = build_dataset(cfg)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=shuffle, num_workers=4, pin_memory=True, persistent_workers=True, worker_init_fn=init_fn)
+    g = torch.Generator()
+    g.manual_seed(cfg.seed)
+    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=shuffle, num_workers=4, pin_memory=True, persistent_workers=True, worker_init_fn=init_fn, generator=g)
     test_loader  = DataLoader(test_ds,  batch_size=cfg.eval_batch_size, shuffle=False, num_workers=1, worker_init_fn=init_fn, persistent_workers=True)
     return train_loader, test_loader
