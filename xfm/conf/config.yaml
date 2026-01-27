@@ -5,7 +5,7 @@ defaults:
   - _self_
 
 seed: 42
-device: "cpu"
+device: cuda
 project_name: "runs"
 
 optimizer:
@@ -30,7 +30,7 @@ rf:
 
 embeddings:
   _target_: xfm.embeddings.build_embeddings.build_embedding_provider
-  name: "smoothrand"
+  name: "rectangle"
   H: ${dataset.image_size}
   W: ${dataset.image_size}
   C: ${dataset.channels}
@@ -38,7 +38,6 @@ embeddings:
   std_scale: 1.0
   # rectangle specific configs:
   blur_sigma: 2.0
-  codes_per_cell: -1
   patch_size: 10
   # smooth random specific configs:
   low_res_dim: 6
@@ -46,26 +45,26 @@ embeddings:
 use_conditioning: false # should be almost always false, only if we do "classic" flow matching, where we dont have label embeddings
 
 # training args
-total_steps: 200000
-eval_every_steps: 40000
-checkpoint_every_steps: 10 # steps correspond to outer loop steps (eval_every_steps steps is one step here). 10 in this setting will only save the final checkpoint
-lr_warmup_steps: 5000
+total_steps: 300000
+eval_every_steps: 25000
+checkpoint_every_steps: 20 # steps correspond to outer loop steps (eval_every_steps steps is one step here). 10 in this setting will only save the final checkpoint
+lr_warmup_steps: 0
 batch_size: 256
 max_grad_norm: null
 
 ema_decay: 0.9999
-ema_warmup_steps: 10000
+ema_warmup_steps: 0
 
 compile_model: true # does currently not work with UNet
 mixed_precision: true
 
 # eval during training
 eval_batch_size: 100
-eval_batches: 50
+eval_batches: 100
 eval_cfg_scale: 1.0
 eval_integration_steps: 40
 classifier_path: "" # path to pre-trained classifier, optional. If provided, the ratio of correct classified generated images will be logged
-fid_ref_dir: null # TODO: check if we need this/how we evaluate imagenet. One option could be to generate the imagenet features once at the very beginning as we do it with cifar.
+fid_ref_dir: null
 
 
 # evaluation using evaluate_checkpoints script
