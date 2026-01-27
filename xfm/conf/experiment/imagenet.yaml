@@ -1,0 +1,26 @@
+# @package _global_
+
+defaults:
+  - override /model: DiT
+  - override /dataset: imagenet100
+  - _self_
+
+
+model:
+  hidden_size: 384
+  depth: 12
+  num_heads: 6
+  patch_size: 2
+
+
+total_steps: 400000
+eval_every_steps: 50000
+
+hydra:
+  mode: MULTIRUN
+  sweep:
+    dir: ${project_name}/sweeps/${now:%Y-%m-%d_%H-%M}_ImageNet_dir_ablations
+    subdir: ${hydra.job.override_dirname}
+  sweeper:
+    params:
+      mode: l2i, i2l, bidi
