@@ -83,21 +83,24 @@ def get_fid_components(dataset_name, device, fid_ref_dir=None):
     fid_resizer = None
     fid_stats = None
     
-    if dataset_name in ["cifar", "imagenet100", "mnist"]:
-         fid_model = fid.build_feature_extractor(mode="clean", device=torch.device(device))
-         fid_resizer = build_resizer(mode="clean")
+    fid_model = fid.build_feature_extractor(mode="legacy_pytorch", device=torch.device(device))
+    fid_resizer = build_resizer(mode="legacy_pytorch")
 
     if dataset_name == "cifar":
-        fid_stats = fid.get_reference_statistics("cifar10", 32, split="test")
+        fid_stats = fid.get_reference_statistics("cifar10", 32, split="test", mode="legacy_pytorch")
     elif dataset_name == "mnist":
         pass
     elif dataset_name == "imagenet100":
         if fid_ref_dir:
-            mu, sigma = fid.get_folder_features(fid_ref_dir, model=fid_model, num_workers=0, batch_size=128, device=torch.device(device), mode="clean")
+            mu, sigma = fid.get_folder_features(
+                fid_ref_dir,
+                model=fid_model,
+                num_workers=4,
+                batch_size=32,
+                device=torch.device(device),
+                mode="legacy_pytorch"
+            )
             fid_stats = (mu, sigma)
-
-    # if no fid_stats are provided, we calcuate them at the beginning of the training (see compute_metrics function above)
-    # probably a bit inefficient
     return fid_model, fid_resizer, fid_stats
 
 
