@@ -3,6 +3,14 @@ from .rf import RF
 
 
 def rf_forward_fn(rf: RF, x, y, use_bf16, device):
+    """
+    Args:
+        rf: The RF wrapper.
+        x: The input images.
+        y: The corresponding class labels.
+        use_bf16: Whether to use bfloat16.
+        device: The device.
+    """
     with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=use_bf16):
         vtheta, target_v, bwd_mask, t = rf.forward(x, y, True)
     sample_mse = ((target_v.float() - vtheta.float()) ** 2).flatten(start_dim=1).mean(dim=1)
@@ -20,6 +28,23 @@ def train_rf(rf: RF,
             use_bf16=False,
             max_grad_norm=None,
             scheduler=None):
+    """
+    Train the RF model.
+
+    Args:
+        rf: The RF model.
+        ema: The EMA model.
+        data_iterator: The training data iterator.
+        loader: The training data loader (to reset the iterator).
+        optimizer: The optimizer.
+        device: The device.
+        num_steps: The number of training steps.
+        logger: The tensorboard logger.
+        global_step: The global step.
+        use_bf16: Whether to use bfloat16.
+        max_grad_norm: Optional maximum gradient norm.
+        scheduler: Optional learning rate scheduler.
+    """
     rf.model.train()
     running = 0.0
     max_grad_norm = float("inf") if max_grad_norm is None else max_grad_norm

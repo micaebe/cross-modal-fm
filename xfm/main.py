@@ -18,6 +18,9 @@ torch.backends.cudnn.allow_tf32 = True
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
+    """
+    Main entry point for the training script.
+    """
     set_seed(cfg.seed)
     run_dir = Path(HydraConfig.get().runtime.output_dir)
     logger = SummaryWriter(log_dir=run_dir)

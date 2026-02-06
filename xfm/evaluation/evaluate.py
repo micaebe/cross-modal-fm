@@ -11,14 +11,35 @@ from .utils import (
     get_final_label_and_image,
     count_correct_image_label_generations
 )
-from pathlib import Path
 import os
 
 
 
 @torch.no_grad()
-def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_classes=10, save_dir: str | Path ="./eval_samples", classifier=None, epoch=0, 
+def evaluate(rf: RF, loader, device, steps=50, cfg_scale=1.0, n_batches=10, num_classes=10, save_dir="./eval_samples", classifier=None, epoch=0, 
              fid_model=None, fid_resizer=None, fid_stats=None, real_feats=None, vae=None, save_gif=True, save_samples=False):
+    """
+    Evaluate the RF model on the given data loader.
+
+    Args:
+        rf: The RF wrapper.
+        loader: The data loader.
+        device: The device.
+        steps: The number of integration steps to use.
+        cfg_scale: The classifier-free-guidance scale to use.
+        n_batches: The number of batches to evaluate.
+        num_classes: The number of classes in the dataset.
+        save_dir: The directory to save the evaluation samples.
+        classifier: Optional a pre-trained classifier model.
+        epoch: The current epoch.
+        fid_model: Optional cleanfid inception model.
+        fid_resizer: Optional cleanfid resizer.
+        fid_stats: Optional FID statistics of the reference images.
+        real_feats: Optional Inception features of the reference images.
+        vae: Optional, the VAE model if images are in latent space.
+        save_gif: Whether to save gifs of the generated samples.
+        save_samples: Whether to save the generated samples.
+    """
     if vae:
         # we load vae only during evaluation onto gpu
         vae.to(device)

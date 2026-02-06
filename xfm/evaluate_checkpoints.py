@@ -16,6 +16,9 @@ torch.backends.cudnn.allow_tf32 = True
 
 @hydra.main(version_base=None, config_path="./conf", config_name="config")
 def main(cfg: DictConfig):
+    """
+    Main entry point for the evaluation script.
+    """
     if "run_dir" not in cfg or cfg.run_dir is None:
         return
     run_dir = Path(cfg.run_dir)
