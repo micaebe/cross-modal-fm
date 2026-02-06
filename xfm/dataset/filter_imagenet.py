@@ -24,6 +24,9 @@ def get_target_indices(num_to_keep, total_classes=1000):
     indices = np.linspace(0, total_classes - 1, num_to_keep)
     return set(np.round(indices).astype(int))
 
+def identity_collate(x):
+    return x
+
 def create_filtered_dataset(src_local, dst_train, dst_test, keep_classes, 
                             test_samples_per_class=100, num_workers=2, batch_size=512):
     for dst in [dst_train, dst_test]:
@@ -36,7 +39,7 @@ def create_filtered_dataset(src_local, dst_train, dst_test, keep_classes,
         dataset,
         batch_size=batch_size,
         num_workers=num_workers,
-        collate_fn=lambda x: x
+        collate_fn=identity_collate
     )
     
     columns = {'vae_output': 'uint8', 'label': 'int'}
