@@ -22,6 +22,24 @@ class RF:
                  ode_method="euler",
                  stochastic_interpolant_scale=0.0 # 0.0 = RF/FM, > 0.0 = Stochastic Interpolant
                  ):
+        """
+        Initializes the RF class.
+
+        Args:
+            model: The model to use (DiT/UNet)
+            ln: Whether to use logit-normal timestep sampling.
+            ln_loc: The location parameter for logit-normal sampling (only used if ln is True).
+            ln_scale: The scale parameter for logit-normal sampling (only used if ln is True).
+            source: The source distribution type ("image", "noise", or "label"). Label is the class representation.
+            target: The target distribution type ("image", "noise", or "label"). Label is the class representation.
+            label_embedder: The label embedder to use. (Class representations)
+            lambda_b: The bidirectional mixing ratio (lambda_m in the report)
+            bidirectional: Whether to use bidirectional training.
+            cls_dropout_prob: The class dropout probability (CrossFlow style indicators) 
+            use_conditioning: Whether to use conditioning. This should be usually False in cross-modal regime.
+            ode_method: The ODE integration method to use, e.g. euler, rk4
+            stochastic_interpolant_scale: Optionally one can use a stochastic bridge by setting this to a value > 0 (wasnt used in the report).
+        """
         # source and target can be "image", "noise, or "label"
         self.model = model
         self.ln = ln
@@ -39,6 +57,9 @@ class RF:
 
     @property
     def is_forward_model(self):
+        """
+        Determine if the model is in C2I or I2C training mode.
+        """
         return self.target_type == "image"
 
     def resolve_endpoints(self, imgs, labels, endpoint, embedding_noise=None):
@@ -78,6 +99,10 @@ class RF:
         return to_drop.long(), masked_labels
 
     def _get_bidir_inputs(self, z0, z1):
+        """
+        Helper to get swapped endpoints and bidirectional mask.
+        False/0 for forward, True/1 for backward.
+        """
         # helper to get swapped endpoints and bidirectional mask
         # False/0 for forward, True/1 for backward
         b = z0.shape[0]
@@ -90,6 +115,15 @@ class RF:
 
 
     def forward(self, imgs, labels, include_metadata=False, t=None, bidi_mask=None):
+        """
+        Forward pass for the model.
+
+        Args:
+            imgs: The input images.
+            labels: The corresponding class labels.
+            include_metadata: Whether to return additional metadata (bidi_mask and t).
+            t: Optional timesteps. If None, they will be sampled (logit-normal if ln is True, else uniform).
+        """
         b = imgs.size(0)
         if t is None:
             if self.ln:
