@@ -2,9 +2,9 @@ import torch
 from .rf import RF
 
 
-def rf_forward_fn(rf: RF, x, y, use_bf16, device, t=None, bidi_mask=None):
+def rf_forward_fn(rf: RF, x, y, use_bf16, device):
     with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=use_bf16):
-        vtheta, target_v, bwd_mask, t = rf.forward(x, y, True, t=t, bidi_mask=bidi_mask)
+        vtheta, target_v, bwd_mask, t = rf.forward(x, y, True)
     sample_mse = ((target_v.float() - vtheta.float()) ** 2).flatten(start_dim=1).mean(dim=1)
     return sample_mse, t, bwd_mask
 

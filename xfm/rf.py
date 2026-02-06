@@ -114,7 +114,7 @@ class RF:
         return z0_new, z1_new, bidi_mask.long()
 
 
-    def forward(self, imgs, labels, include_metadata=False, t=None, bidi_mask=None):
+    def forward(self, imgs, labels, include_metadata=False, t=None):
         """
         Forward pass for the model.
 
